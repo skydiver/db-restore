@@ -1,13 +1,16 @@
 {
-  "name": "typescript-starter",
-  "version": "1.1.0",
-  "description": "Yet another TypeScript starter template",
+  "name": "db-restore",
+  "version": "0.1.0",
+  "description": "Database backup & restore for local development",
   "license": "MIT",
   "author": {
     "name": "Martín M.",
     "url": "https://github.com/skydiver/"
   },
   "type": "module",
+  "bin": {
+    "db-restore": "./build/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./build/index.d.ts",
@@ -18,18 +21,20 @@
   "scripts": {
     "build": "tsup",
     "clean": "rimraf build",
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/cli.ts",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "start": "tsx src/index.ts",
-    "test": "vitest src",
+    "start": "tsx src/cli.ts",
+    "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.11",
     "@tsconfig/node24": "^24.0.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.0.0",
+    "@types/pg": "^8.16.0",
     "@vitest/coverage-v8": "^4.0.10",
     "globals": "^17.0.0",
     "rimraf": "^6.1.0",
@@ -49,7 +54,18 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "better-sqlite3",
       "esbuild"
     ]
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^8.2.0",
+    "better-sqlite3": "^12.6.2",
+    "chalk": "^5.6.2",
+    "cli-table3": "^0.6.5",
+    "commander": "^14.0.3",
+    "mysql2": "^3.17.0",
+    "ora": "^9.3.0",
+    "pg": "^8.18.0"
   }
 }

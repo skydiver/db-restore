@@ -20,12 +20,11 @@
     "strictNullChecks": true,
     "noImplicitOverride": true,
     "outDir": "build",
-    "rootDir": "src",
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.test.ts"],
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules", "build"]
 }

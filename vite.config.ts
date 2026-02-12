@@ -5,6 +5,6 @@ export default defineConfig({
   plugins: [tsconfigPaths()],
   test: {
     globals: true,
-    include: ['src/**/*.test.ts'],
+    include: ['tests/**/*.test.ts'],
   },
 });
