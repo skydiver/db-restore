@@ -1,12 +1,12 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { CONFIG_BASE_DIR } from '../constants.js';
 import type { AnyProfileConfig } from '../providers/types.js';
 
 function resolveDir(configDir?: string): string {
   if (configDir) return configDir;
-  return join(homedir(), '.config', 'db-restore', 'profiles');
+  return join(CONFIG_BASE_DIR, 'profiles');
 }
 
 export async function saveProfile(profile: AnyProfileConfig, configDir?: string): Promise<void> {

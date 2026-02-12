@@ -1,3 +1,6 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
 export const EXCLUDED_TABLES = new Set([
   '_prisma_migrations',
   '__drizzle_migrations',
@@ -11,7 +14,12 @@ export const EXCLUDED_TABLES = new Set([
   '_cf_KV',
 ]);
 
-export const DEFAULT_DUMP_DIR = './db-backup';
+export const CONFIG_BASE_DIR = join(homedir(), '.config', 'db-restore');
+export const DUMPS_DIR = join(CONFIG_BASE_DIR, 'dumps');
+
+export function getDefaultDumpDir(profileName: string): string {
+  return join(DUMPS_DIR, profileName);
+}
 export const METADATA_FILENAME = '_metadata.json';
 export const DUMP_FORMAT_VERSION = 1;
 

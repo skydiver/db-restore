@@ -6,7 +6,7 @@ import { profilesCommand, removeCommand } from './commands/profiles.js';
 import { executeRestore } from './commands/restore.js';
 import { setupCommand } from './commands/setup.js';
 import { loadProfile } from './config/profiles.js';
-import { DEFAULT_DUMP_DIR } from './constants.js';
+import { getDefaultDumpDir } from './constants.js';
 import { handleError } from './ui/errors.js';
 import { printHeader } from './ui/header.js';
 import * as logger from './ui/logger.js';
@@ -21,7 +21,7 @@ const program = new Command();
 program
   .name('db-restore')
   .description('Database backup & restore for local development')
-  .version('0.1.0')
+  .version('1.0.0')
   .hook('preAction', () => printHeader());
 
 program
@@ -39,11 +39,12 @@ program
 program
   .command('dump <name>')
   .description('Dump all tables to JSON')
-  .option('--out <dir>', 'Output directory', DEFAULT_DUMP_DIR)
+  .option('--out <dir>', 'Output directory (default: ~/.config/db-restore/dumps/<name>)')
   .option('--verbose', 'Show detailed output', false)
-  .action(async (name: string, opts: { out: string; verbose: boolean }) => {
+  .action(async (name: string, opts: { out?: string; verbose: boolean }) => {
     try {
       const profile = await loadProfile(name);
+      const outputDir = opts.out ?? getDefaultDumpDir(name);
 
       const connectionInfo =
         profile.provider === 'sqlite'
@@ -52,8 +53,8 @@ program
       logger.info(`Profile: ${name} (${connectionInfo})`);
 
       // Handle previous dump
-      if (await dumpExists(opts.out)) {
-        const meta = await readMetadata(opts.out);
+      if (await dumpExists(outputDir)) {
+        const meta = await readMetadata(outputDir);
         logger.warn(`Previous dump found (${meta.timestamp}, ${meta.tables.length} tables)`);
         const choice = await askArchiveChoice();
         if (choice === 'cancel') {
@@ -61,7 +62,7 @@ program
           return;
         }
         if (choice === 'archive') {
-          const archivePath = await archiveDump(opts.out);
+          const archivePath = await archiveDump(outputDir);
           logger.info(`Archived to ${archivePath}`);
         }
       }
@@ -76,7 +77,7 @@ program
 
       // Dump
       const dumpSpinner = ora('Dumping tables...').start();
-      const result = await executeDump(provider, profile.provider, opts.out);
+      const result = await executeDump(provider, profile.provider, outputDir);
       dumpSpinner.succeed(`${result.tables.length} tables found.`);
 
       await provider.disconnect();
@@ -88,7 +89,7 @@ program
         totalRow: ['Total', result.totalRows],
       });
 
-      logger.success(`Dump saved to ${opts.out} (${result.tables.length} files)`);
+      logger.success(`Dump saved to ${outputDir} (${result.tables.length} files)`);
     } catch (err) {
       handleError(err, { profile: name });
       process.exit(1);
@@ -98,11 +99,12 @@ program
 program
   .command('restore <name>')
   .description('Restore tables from JSON dump')
-  .option('--in <dir>', 'Input directory', DEFAULT_DUMP_DIR)
+  .option('--in <dir>', 'Input directory (default: ~/.config/db-restore/dumps/<name>)')
   .option('--verbose', 'Show detailed output', false)
-  .action(async (name: string, opts: { in: string; verbose: boolean }) => {
+  .action(async (name: string, opts: { in?: string; verbose: boolean }) => {
     try {
       const profile = await loadProfile(name);
+      const inputDir = opts.in ?? getDefaultDumpDir(name);
 
       const pw = profile.provider === 'sqlite' ? undefined : await askPassword();
       const spinner = ora('Connecting...').start();
@@ -112,7 +114,7 @@ program
       spinner.succeed('Connected.');
 
       const restoreSpinner = ora('Restoring...').start();
-      const result = await executeRestore(provider, opts.in);
+      const result = await executeRestore(provider, inputDir);
       restoreSpinner.succeed('Restore complete.');
 
       await provider.disconnect();

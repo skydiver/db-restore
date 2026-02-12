@@ -1,6 +1,6 @@
 {
   "name": "db-restore",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Database backup & restore for local development",
   "license": "MIT",
   "author": {
@@ -11,14 +11,8 @@
   "bin": {
     "db-restore": "./build/cli.js"
   },
-  "exports": {
-    ".": {
-      "types": "./build/index.d.ts",
-      "import": "./build/index.js"
-    }
-  },
-  "main": "./build/index.js",
   "scripts": {
+    "prepare": "tsup",
     "build": "tsup",
     "clean": "rimraf build",
     "dev": "tsx watch src/cli.ts",

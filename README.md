@@ -82,7 +82,7 @@ $ db-restore dump myproject
 │ Total    │  471 │
 └──────────┴──────┘
 
-Dump saved to ./db-backup (3 files)
+Dump saved to ~/.config/db-restore/dumps/myproject (3 files)
 ```
 
 If a previous dump exists, you'll be asked to archive it (`.tar.gz`), discard it, or cancel.
@@ -188,11 +188,15 @@ ORM migration tables are automatically excluded from dumps:
 ## Dump Format
 
 ```
-db-backup/
-  _metadata.json     # provider, timestamp, table list, format version
-  users.json         # one file per table
-  posts.json
-  comments.json
+~/.config/db-restore/
+  profiles/
+    myproject.json
+  dumps/
+    myproject/
+      _metadata.json     # provider, timestamp, table list, format version
+      users.json         # one file per table
+      posts.json
+      comments.json
 ```
 
 Each table file contains column metadata and all rows:
