@@ -1,6 +1,6 @@
 {
   "name": "db-restore",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Database backup & restore for local development",
   "license": "MIT",
   "author": {

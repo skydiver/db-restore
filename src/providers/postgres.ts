@@ -52,7 +52,7 @@ export class PostgresProvider implements DatabaseProvider {
        FROM pg_index i
        JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
        WHERE i.indrelid = $1::regclass AND i.indisprimary`,
-      [table]
+      [`"${table}"`]
     );
     return (result.rows as { attname: string }[]).map((r) => r.attname);
   }
@@ -112,7 +112,7 @@ export class PostgresProvider implements DatabaseProvider {
       try {
         await client.query(
           `SELECT setval(pg_get_serial_sequence($1, $2), COALESCE(MAX("${col.name}"), 0) + 1, false) FROM "${table}"`,
-          [table, col.name]
+          [`"${table}"`, col.name]
         );
       } catch {
         // Column doesn't have a sequence — skip silently

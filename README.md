@@ -21,20 +21,17 @@ ORM migration resets (`prisma migrate reset`, `drizzle-kit push --force-reset`, 
 ## Quick Start
 
 ```bash
-# Install
-pnpm add -g db-restore
-
 # Create a profile (one-time)
-db-restore setup myproject
+npx github:skydiver/db-restore setup myproject
 
 # Before migration reset: dump your data
-db-restore dump myproject
+npx github:skydiver/db-restore dump myproject
 
 # Run your ORM reset
 prisma migrate reset   # or drizzle-kit push --force-reset, etc.
 
 # After migration reset: restore your data
-db-restore restore myproject
+npx github:skydiver/db-restore restore myproject
 ```
 
 ## Commands
