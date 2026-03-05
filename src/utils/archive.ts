@@ -27,3 +27,12 @@ export async function archiveDump(dumpDir: string, profileName: string): Promise
 
   return archivePath;
 }
+
+export async function deleteDump(dumpDir: string): Promise<void> {
+  const files = await readdir(dumpDir);
+  const jsonFiles = files.filter((f) => f.endsWith('.json'));
+
+  for (const file of jsonFiles) {
+    await rm(join(dumpDir, file));
+  }
+}

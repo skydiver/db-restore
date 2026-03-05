@@ -15,6 +15,17 @@ export async function askArchiveChoice(): Promise<'archive' | 'discard' | 'cance
   });
 }
 
+export async function askPostRestoreChoice(): Promise<'delete' | 'archive' | 'quit'> {
+  return select({
+    message: 'What would you like to do with the dump files?',
+    choices: [
+      { name: 'Delete dump files', value: 'delete' as const },
+      { name: 'Archive (.tar.gz)', value: 'archive' as const },
+      { name: 'Keep as-is', value: 'quit' as const },
+    ],
+  });
+}
+
 export async function askOverwrite(name: string): Promise<boolean> {
   return confirm({
     message: `Profile "${name}" already exists. Overwrite?`,

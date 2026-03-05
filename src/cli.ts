@@ -11,9 +11,9 @@ import { handleError } from './ui/errors.js';
 import { printHeader } from './ui/header.js';
 import * as logger from './ui/logger.js';
 import { printTable } from './ui/table.js';
-import { archiveDump } from './utils/archive.js';
+import { archiveDump, deleteDump } from './utils/archive.js';
 import { dumpExists, readMetadata } from './utils/files.js';
-import { askArchiveChoice, askPassword } from './utils/prompt.js';
+import { askArchiveChoice, askPassword, askPostRestoreChoice } from './utils/prompt.js';
 import { buildConnectionConfig, createProvider } from './utils/provider-factory.js';
 
 const program = new Command();
@@ -106,6 +106,14 @@ program
       const profile = await loadProfile(name);
       const inputDir = opts.in ?? getDefaultDumpDir(name);
 
+      if (!(await dumpExists(inputDir))) {
+        logger.error(
+          `No dump found for profile "${name}".`,
+          `Run first: db-restore dump ${name}`
+        );
+        return;
+      }
+
       const pw = profile.provider === 'sqlite' ? undefined : await askPassword();
       const spinner = ora('Connecting...').start();
       const provider = await createProvider(profile.provider);
@@ -133,6 +141,15 @@ program
       logger.success(
         `Restore complete (${result.totalRows} rows across ${result.tables.length} tables)`
       );
+
+      const postChoice = await askPostRestoreChoice();
+      if (postChoice === 'delete') {
+        await deleteDump(inputDir);
+        logger.info('Dump files deleted.');
+      } else if (postChoice === 'archive') {
+        const archivePath = await archiveDump(inputDir, name);
+        logger.info(`Archived to ${archivePath}`);
+      }
     } catch (err) {
       handleError(err, { profile: name });
       process.exit(1);
