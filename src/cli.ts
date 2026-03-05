@@ -21,7 +21,7 @@ const program = new Command();
 program
   .name('db-restore')
   .description('Database backup & restore for local development')
-  .version('1.0.1')
+  .version('1.0.2')
   .hook('preAction', () => printHeader());
 
 program
@@ -62,7 +62,7 @@ program
           return;
         }
         if (choice === 'archive') {
-          const archivePath = await archiveDump(outputDir);
+          const archivePath = await archiveDump(outputDir, name);
           logger.info(`Archived to ${archivePath}`);
         }
       }

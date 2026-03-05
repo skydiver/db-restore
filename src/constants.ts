@@ -16,6 +16,7 @@ export const EXCLUDED_TABLES = new Set([
 
 export const CONFIG_BASE_DIR = join(homedir(), '.config', 'db-restore');
 export const DUMPS_DIR = join(CONFIG_BASE_DIR, 'dumps');
+export const ARCHIVE_DIR = join(CONFIG_BASE_DIR, 'archive');
 
 export function getDefaultDumpDir(profileName: string): string {
   return join(DUMPS_DIR, profileName);
