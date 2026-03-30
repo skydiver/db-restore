@@ -21,7 +21,7 @@ const program = new Command();
 program
   .name('db-restore')
   .description('Database backup & restore for local development')
-  .version('1.0.2')
+  .version('1.0.3')
   .hook('preAction', () => printHeader());
 
 program

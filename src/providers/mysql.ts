@@ -74,10 +74,17 @@ export class MysqlProvider implements DatabaseProvider {
     if (rows.length === 0) return;
 
     const colNames = columns.map((c) => c.name);
+    const jsonCols = new Set(
+      columns.filter((c) => c.type === 'json').map((c) => c.name)
+    );
 
     for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
       const row = rows[rowIndex]!;
-      const values = colNames.map((c) => row[c] ?? null);
+      const values = colNames.map((c) => {
+        const val = row[c] ?? null;
+        if (jsonCols.has(c) && val !== null) return JSON.stringify(val);
+        return val;
+      });
       const placeholders = values.map(() => '?').join(', ');
       const colList = colNames.map((c) => `\`${c}\``).join(', ');
 

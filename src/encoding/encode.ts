@@ -26,10 +26,17 @@ export function encodeValue(value: unknown): unknown {
   return value;
 }
 
-export function encodeRow(row: Record<string, unknown>): Record<string, unknown> {
+export function encodeRow(
+  row: Record<string, unknown>,
+  jsonColumns?: Set<string>
+): Record<string, unknown> {
   const encoded: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row)) {
-    encoded[key] = encodeValue(value);
+    if (jsonColumns?.has(key) && value !== null && value !== undefined) {
+      encoded[key] = { __type: 'json', value } satisfies TypeWrapper;
+    } else {
+      encoded[key] = encodeValue(value);
+    }
   }
   return encoded;
 }

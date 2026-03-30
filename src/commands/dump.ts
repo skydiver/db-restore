@@ -22,7 +22,10 @@ export async function executeDump(
     const columns = await provider.getColumns(table);
     const primaryKeys = await provider.getPrimaryKeys(table);
     const rows = await provider.getRows(table);
-    const encodedRows = rows.map(encodeRow);
+    const jsonColumns = new Set(
+      columns.filter((c) => c.type === 'json' || c.type === 'jsonb').map((c) => c.name)
+    );
+    const encodedRows = rows.map((row) => encodeRow(row, jsonColumns));
 
     const dump: TableDump = {
       table,
