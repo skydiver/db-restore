@@ -589,7 +589,7 @@ async function deleteDump(dumpDir) {
 
 // src/cli.ts
 var program = new Command();
-program.name("db-restore").description("Database backup & restore for local development").version("1.0.3").hook("preAction", () => printHeader()).action(() => program.help());
+program.name("db-restore").description("Database backup & restore for local development").version("1.0.4").hook("preAction", () => printHeader()).action(() => program.help());
 program.command("setup <name>").description("Create a new database profile interactively").action(async (name) => {
   try {
     await setupCommand(name);
