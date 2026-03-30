@@ -19,11 +19,7 @@
     "noUncheckedIndexedAccess": true,
     "strictNullChecks": true,
     "noImplicitOverride": true,
-    "outDir": "build",
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    }
+    "outDir": "build"
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules", "build"]

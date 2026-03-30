@@ -1,11 +1,11 @@
-import mysql from 'mysql2/promise';
+import { createConnection, type Connection } from 'mysql2/promise';
 import type { Column, ConnectionConfig, DatabaseProvider } from './types.js';
 
 export class MysqlProvider implements DatabaseProvider {
-  private connection: mysql.Connection | null = null;
+  private connection: Connection | null = null;
 
   async connect(config: ConnectionConfig): Promise<void> {
-    this.connection = await mysql.createConnection({
+    this.connection = await createConnection({
       host: config.host,
       port: config.port,
       database: config.database,
@@ -19,7 +19,7 @@ export class MysqlProvider implements DatabaseProvider {
     this.connection = null;
   }
 
-  private getConnection(): mysql.Connection {
+  private getConnection(): Connection {
     if (!this.connection) throw new Error('Not connected');
     return this.connection;
   }
