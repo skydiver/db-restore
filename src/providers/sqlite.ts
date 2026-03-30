@@ -90,9 +90,15 @@ export class SqliteProvider implements DatabaseProvider {
 
     const stmt = db.prepare(sql);
     const insertMany = db.transaction((rowsToInsert: Record<string, unknown>[]) => {
-      for (const row of rowsToInsert) {
+      for (let rowIndex = 0; rowIndex < rowsToInsert.length; rowIndex++) {
+        const row = rowsToInsert[rowIndex]!;
         const values = colNames.map((c) => row[c] ?? null);
-        stmt.run(...values);
+        try {
+          stmt.run(...values);
+        } catch (err) {
+          const original = err instanceof Error ? err.message : String(err);
+          throw new Error(`Restoring table "${table}" (row ${rowIndex}): ${original}`);
+        }
       }
     });
 

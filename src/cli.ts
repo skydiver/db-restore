@@ -123,7 +123,12 @@ program
 
       const restoreSpinner = ora('Restoring...').start();
       const result = await executeRestore(provider, inputDir);
-      restoreSpinner.succeed('Restore complete.');
+      const hasErrors = result.errors.length > 0;
+      if (hasErrors) {
+        restoreSpinner.fail('Restore finished with errors.');
+      } else {
+        restoreSpinner.succeed('Restore complete.');
+      }
 
       await provider.disconnect();
 
@@ -138,9 +143,21 @@ program
         logger.warn(warning);
       }
 
-      logger.success(
-        `Restore complete (${result.totalRows} rows across ${result.tables.length} tables)`
-      );
+      for (const error of result.errors) {
+        const [first, ...rest] = error.split('\n');
+        const hint = rest.length > 0 ? rest.join('\n') : undefined;
+        logger.error(first ?? error, hint);
+      }
+
+      if (hasErrors) {
+        logger.info(
+          `Partial restore: ${result.totalRows} rows across ${result.tables.length} tables (${result.errors.length} table(s) failed)`
+        );
+      } else {
+        logger.success(
+          `Restore complete (${result.totalRows} rows across ${result.tables.length} tables)`
+        );
+      }
 
       const postChoice = await askPostRestoreChoice();
       if (postChoice === 'delete') {

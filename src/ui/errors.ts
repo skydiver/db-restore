@@ -32,6 +32,12 @@ const errorHints: ErrorHint[] = [
     message: (err) => err.message,
     hint: (_err, ctx) => `Create it first or check the profile: db-restore setup ${ctx.profile}`,
   },
+  {
+    match: (err) => err.message.includes('invalid input syntax'),
+    message: (err) => err.message,
+    hint: () =>
+      'The dump may contain values incompatible with the target column type. Try re-dumping with the latest version.',
+  },
 ];
 
 export function handleError(err: unknown, context: ErrorContext = {}): void {

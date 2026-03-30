@@ -79,7 +79,8 @@ export class PostgresProvider implements DatabaseProvider {
 
     const colNames = columns.map((c) => c.name);
 
-    for (const row of rows) {
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      const row = rows[rowIndex]!;
       const values = colNames.map((c) => row[c] ?? null);
       const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
       const colList = colNames.map((c) => `"${c}"`).join(', ');
@@ -100,8 +101,47 @@ export class PostgresProvider implements DatabaseProvider {
         }
       }
 
-      await client.query(sql, values);
+      try {
+        await client.query(sql, values);
+      } catch (err) {
+        const original = err instanceof Error ? err.message : String(err);
+        const details = this.buildErrorDetails(original, columns, values);
+        throw new Error(
+          `Restoring table "${table}" (row ${rowIndex}): ${original}${details}`
+        );
+      }
     }
+  }
+
+  private buildErrorDetails(message: string, columns: Column[], values: unknown[]): string {
+    if (!message.toLowerCase().includes('json')) return '';
+
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i]!;
+      const val = values[i];
+      if (
+        (col.type === 'json' || col.type === 'jsonb') &&
+        val !== null &&
+        val !== undefined &&
+        (typeof val !== 'object' || Array.isArray(val))
+      ) {
+        const preview = this.formatValuePreview(val);
+        const valType = Array.isArray(val) ? 'array' : typeof val;
+        return `\n\n  Column: ${col.name} (${col.type})\n  Value:  ${preview} (${valType})`;
+      }
+    }
+    return '';
+  }
+
+  private formatValuePreview(val: unknown): string {
+    if (typeof val === 'string') {
+      return val.length > 50 ? `"${val.slice(0, 50)}..."` : `"${val}"`;
+    }
+    if (Array.isArray(val)) {
+      const str = JSON.stringify(val);
+      return str.length > 50 ? `${str.slice(0, 50)}...` : str;
+    }
+    return String(val);
   }
 
   async resetSequences(table: string): Promise<void> {

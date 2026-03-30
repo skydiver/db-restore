@@ -75,7 +75,8 @@ export class MysqlProvider implements DatabaseProvider {
 
     const colNames = columns.map((c) => c.name);
 
-    for (const row of rows) {
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      const row = rows[rowIndex]!;
       const values = colNames.map((c) => row[c] ?? null);
       const placeholders = values.map(() => '?').join(', ');
       const colList = colNames.map((c) => `\`${c}\``).join(', ');
@@ -93,7 +94,12 @@ export class MysqlProvider implements DatabaseProvider {
         }
       }
 
-      await conn.query(sql, values);
+      try {
+        await conn.query(sql, values);
+      } catch (err) {
+        const original = err instanceof Error ? err.message : String(err);
+        throw new Error(`Restoring table "${table}" (row ${rowIndex}): ${original}`);
+      }
     }
   }
 

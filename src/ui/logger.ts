@@ -9,7 +9,11 @@ export function warn(message: string): void {
 }
 
 export function error(message: string, hint?: string): void {
-  console.log(chalk.red(`✗ Error: ${message}`));
+  const [first, ...rest] = message.split('\n');
+  console.log(chalk.red(`✗ Error: ${first}`));
+  if (rest.length > 0) {
+    console.log(chalk.gray(rest.join('\n')));
+  }
   if (hint) {
     console.log(chalk.gray(`  Hint: ${hint}`));
   }
