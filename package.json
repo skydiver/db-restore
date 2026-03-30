@@ -12,7 +12,6 @@
     "db-restore": "./build/cli.js"
   },
   "scripts": {
-    "prepare": "tsup",
     "build": "tsup",
     "clean": "rimraf build",
     "dev": "tsx watch src/cli.ts",

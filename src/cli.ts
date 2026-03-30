@@ -22,7 +22,8 @@ program
   .name('db-restore')
   .description('Database backup & restore for local development')
   .version('1.0.3')
-  .hook('preAction', () => printHeader());
+  .hook('preAction', () => printHeader())
+  .action(() => program.help());
 
 program
   .command('setup <name>')

@@ -4,6 +4,6 @@ export default defineConfig({
   entry: ['src/cli.ts'],
   format: ['esm'],
   outDir: 'build',
-  dts: true,
+  dts: false,
   clean: true,
 });
