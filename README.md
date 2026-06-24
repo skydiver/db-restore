@@ -12,11 +12,11 @@ ORM migration resets (`prisma migrate reset`, `drizzle-kit push --force-reset`, 
 
 ## Supported Databases
 
-| Database   | Driver          |
-| ---------- | --------------- |
-| PostgreSQL | `pg`            |
-| MySQL      | `mysql2`        |
-| SQLite     | `better-sqlite3`|
+| Database   | Driver           |
+| ---------- | ---------------- |
+| PostgreSQL | `pg`             |
+| MySQL      | `mysql2`         |
+| SQLite     | `better-sqlite3` |
 
 ## Quick Start
 
@@ -25,23 +25,23 @@ ORM migration resets (`prisma migrate reset`, `drizzle-kit push --force-reset`, 
 npx github:skydiver/db-restore setup myproject
 
 # Before migration reset: dump your data
-npx github:skydiver/db-restore dump myproject
+npx github:skydiver/db-restore myproject dump
 
 # Run your ORM reset
 prisma migrate reset   # or drizzle-kit push --force-reset, etc.
 
 # After migration reset: restore your data
-npx github:skydiver/db-restore restore myproject
+npx github:skydiver/db-restore myproject restore
 ```
 
 ## Commands
 
 ```
-db-restore setup <name>              Create a new database profile interactively
-db-restore dump <name> [--out <dir>] Dump all tables to JSON
-db-restore restore <name> [--in <dir>] Restore tables from JSON dump
-db-restore profiles                  List all saved profiles
-db-restore remove <name>             Delete a profile
+db-restore setup <name>                Create a new database profile interactively
+db-restore <name> dump [--out <dir>]   Dump all tables to JSON
+db-restore <name> restore [--in <dir>] Restore tables from JSON dump
+db-restore profiles                    List all saved profiles
+db-restore remove <name>               Delete a profile
 ```
 
 ### `setup`
@@ -67,7 +67,7 @@ Profile "myproject" saved.
 Connects to the database, discovers all tables (excluding ORM migration tables), and writes each table's data to a JSON file.
 
 ```
-$ db-restore dump myproject
+$ db-restore myproject dump
 
 ┌──────────┬──────┐
 │ Table    │ Rows │
@@ -89,7 +89,7 @@ If a previous dump exists, you'll be asked to archive it (`.tar.gz`), discard it
 Reads the dump files and writes data back using UPSERT — your development data is merged with any new seed data from migrations.
 
 ```
-$ db-restore restore myproject
+$ db-restore myproject restore
 
 ┌──────────┬──────┬──────────┐
 │ Table    │ Rows │ Strategy │
@@ -211,7 +211,10 @@ Each table file contains column metadata and all rows:
     {
       "id": 1,
       "email": "dev@example.com",
-      "created_at": { "__type": "datetime", "value": "2026-01-15T10:30:00.000Z" }
+      "created_at": {
+        "__type": "datetime",
+        "value": "2026-01-15T10:30:00.000Z"
+      }
     }
   ]
 }

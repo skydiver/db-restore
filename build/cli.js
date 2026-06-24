@@ -589,113 +589,136 @@ async function deleteDump(dumpDir) {
 
 // src/cli.ts
 var program = new Command();
-program.name("db-restore").description("Database backup & restore for local development").version("1.0.4").hook("preAction", () => printHeader()).action(() => program.help());
+async function runDump(name, opts) {
+  const profile = await loadProfile(name);
+  const outputDir = opts.out ?? getDefaultDumpDir(name);
+  const connectionInfo = profile.provider === "sqlite" ? `${profile.provider} @ ${profile.path}` : `${profile.provider} @ ${profile.host}:${profile.port}/${profile.database}`;
+  info(`Profile: ${name} (${connectionInfo})`);
+  if (await dumpExists(outputDir)) {
+    const meta = await readMetadata(outputDir);
+    warn(`Previous dump found (${meta.timestamp}, ${meta.tables.length} tables)`);
+    const choice = await askArchiveChoice();
+    if (choice === "cancel") {
+      info("Dump cancelled.");
+      return;
+    }
+    if (choice === "archive") {
+      const archivePath = await archiveDump(outputDir, name);
+      info(`Archived to ${archivePath}`);
+    }
+  }
+  const pw = profile.provider === "sqlite" ? void 0 : await askPassword();
+  const spinner = ora2("Connecting...").start();
+  const provider = await createProvider(profile.provider);
+  const config = buildConnectionConfig(profile, pw);
+  await provider.connect(config);
+  spinner.succeed("Connected.");
+  const dumpSpinner = ora2("Dumping tables...").start();
+  const result = await executeDump(provider, profile.provider, outputDir);
+  dumpSpinner.succeed(`${result.tables.length} tables found.`);
+  await provider.disconnect();
+  printTable({
+    head: ["Table", "Rows"],
+    rows: result.tables.map((t) => [t.table, t.rowCount]),
+    totalRow: ["Total", result.totalRows]
+  });
+  success(`Dump saved to ${outputDir} (${result.tables.length} files)`);
+}
+async function runRestore(name, opts) {
+  const profile = await loadProfile(name);
+  const inputDir = opts.in ?? getDefaultDumpDir(name);
+  if (!await dumpExists(inputDir)) {
+    error(`No dump found for profile "${name}".`, `Run first: db-restore ${name} dump`);
+    return;
+  }
+  const pw = profile.provider === "sqlite" ? void 0 : await askPassword();
+  const spinner = ora2("Connecting...").start();
+  const provider = await createProvider(profile.provider);
+  const config = buildConnectionConfig(profile, pw);
+  await provider.connect(config);
+  spinner.succeed("Connected.");
+  const restoreSpinner = ora2("Restoring...").start();
+  const result = await executeRestore(provider, inputDir);
+  const hasErrors = result.errors.length > 0;
+  if (hasErrors) {
+    restoreSpinner.fail("Restore finished with errors.");
+  } else {
+    restoreSpinner.succeed("Restore complete.");
+  }
+  await provider.disconnect();
+  printTable({
+    head: ["Table", "Rows", "Strategy"],
+    rows: result.tables.map((t) => [t.table, t.rowCount, t.strategy]),
+    totalRow: ["Total", result.totalRows, ""]
+  });
+  for (const warning of result.warnings) {
+    warn(warning);
+  }
+  for (const error2 of result.errors) {
+    const [first, ...rest] = error2.split("\n");
+    const hint = rest.length > 0 ? rest.join("\n") : void 0;
+    error(first ?? error2, hint);
+  }
+  if (hasErrors) {
+    info(
+      `Partial restore: ${result.totalRows} rows across ${result.tables.length} tables (${result.errors.length} table(s) failed)`
+    );
+  } else {
+    success(
+      `Restore complete (${result.totalRows} rows across ${result.tables.length} tables)`
+    );
+  }
+  const postChoice = await askPostRestoreChoice();
+  if (postChoice === "delete") {
+    await deleteDump(inputDir);
+    info("Dump files deleted.");
+  } else if (postChoice === "archive") {
+    const archivePath = await archiveDump(inputDir, name);
+    info(`Archived to ${archivePath}`);
+  }
+}
+program.name("db-restore").description("Database backup & restore for local development").version("1.0.4").argument("[name]", "profile name").argument("[action]", "action to run: dump or restore").option("--out <dir>", "Dump output directory (default: ~/.config/db-restore/dumps/<name>)").option("--in <dir>", "Restore input directory (default: ~/.config/db-restore/dumps/<name>)").option("--verbose", "Show detailed output", false).hook("preAction", () => printHeader()).action(
+  async (name, action, opts) => {
+    if (!name) {
+      program.help();
+      return;
+    }
+    try {
+      if (!await profileExists(name)) {
+        error(
+          `Profile "${name}" not found.`,
+          'Run "db-restore profiles" to list profiles, or "db-restore setup <name>" to create one.'
+        );
+        process.exit(1);
+      }
+      if (action === "dump") {
+        await runDump(name, opts);
+      } else if (action === "restore") {
+        await runRestore(name, opts);
+      } else if (!action) {
+        error(
+          `No action specified for profile "${name}".`,
+          `Run: db-restore ${name} dump  |  db-restore ${name} restore`
+        );
+        process.exit(1);
+      } else {
+        error(
+          `Unknown action "${action}".`,
+          `Valid actions: dump, restore. Example: db-restore ${name} dump`
+        );
+        process.exit(1);
+      }
+    } catch (err) {
+      handleError(err, { profile: name });
+      process.exit(1);
+    }
+  }
+);
 program.command("setup <name>").description("Create a new database profile interactively").action(async (name) => {
   try {
     await setupCommand(name);
   } catch (err) {
     handleError(err);
-    process.exit(1);
-  }
-});
-program.command("dump <name>").description("Dump all tables to JSON").option("--out <dir>", "Output directory (default: ~/.config/db-restore/dumps/<name>)").option("--verbose", "Show detailed output", false).action(async (name, opts) => {
-  try {
-    const profile = await loadProfile(name);
-    const outputDir = opts.out ?? getDefaultDumpDir(name);
-    const connectionInfo = profile.provider === "sqlite" ? `${profile.provider} @ ${profile.path}` : `${profile.provider} @ ${profile.host}:${profile.port}/${profile.database}`;
-    info(`Profile: ${name} (${connectionInfo})`);
-    if (await dumpExists(outputDir)) {
-      const meta = await readMetadata(outputDir);
-      warn(`Previous dump found (${meta.timestamp}, ${meta.tables.length} tables)`);
-      const choice = await askArchiveChoice();
-      if (choice === "cancel") {
-        info("Dump cancelled.");
-        return;
-      }
-      if (choice === "archive") {
-        const archivePath = await archiveDump(outputDir, name);
-        info(`Archived to ${archivePath}`);
-      }
-    }
-    const pw = profile.provider === "sqlite" ? void 0 : await askPassword();
-    const spinner = ora2("Connecting...").start();
-    const provider = await createProvider(profile.provider);
-    const config = buildConnectionConfig(profile, pw);
-    await provider.connect(config);
-    spinner.succeed("Connected.");
-    const dumpSpinner = ora2("Dumping tables...").start();
-    const result = await executeDump(provider, profile.provider, outputDir);
-    dumpSpinner.succeed(`${result.tables.length} tables found.`);
-    await provider.disconnect();
-    printTable({
-      head: ["Table", "Rows"],
-      rows: result.tables.map((t) => [t.table, t.rowCount]),
-      totalRow: ["Total", result.totalRows]
-    });
-    success(`Dump saved to ${outputDir} (${result.tables.length} files)`);
-  } catch (err) {
-    handleError(err, { profile: name });
-    process.exit(1);
-  }
-});
-program.command("restore <name>").description("Restore tables from JSON dump").option("--in <dir>", "Input directory (default: ~/.config/db-restore/dumps/<name>)").option("--verbose", "Show detailed output", false).action(async (name, opts) => {
-  try {
-    const profile = await loadProfile(name);
-    const inputDir = opts.in ?? getDefaultDumpDir(name);
-    if (!await dumpExists(inputDir)) {
-      error(
-        `No dump found for profile "${name}".`,
-        `Run first: db-restore dump ${name}`
-      );
-      return;
-    }
-    const pw = profile.provider === "sqlite" ? void 0 : await askPassword();
-    const spinner = ora2("Connecting...").start();
-    const provider = await createProvider(profile.provider);
-    const config = buildConnectionConfig(profile, pw);
-    await provider.connect(config);
-    spinner.succeed("Connected.");
-    const restoreSpinner = ora2("Restoring...").start();
-    const result = await executeRestore(provider, inputDir);
-    const hasErrors = result.errors.length > 0;
-    if (hasErrors) {
-      restoreSpinner.fail("Restore finished with errors.");
-    } else {
-      restoreSpinner.succeed("Restore complete.");
-    }
-    await provider.disconnect();
-    printTable({
-      head: ["Table", "Rows", "Strategy"],
-      rows: result.tables.map((t) => [t.table, t.rowCount, t.strategy]),
-      totalRow: ["Total", result.totalRows, ""]
-    });
-    for (const warning of result.warnings) {
-      warn(warning);
-    }
-    for (const error2 of result.errors) {
-      const [first, ...rest] = error2.split("\n");
-      const hint = rest.length > 0 ? rest.join("\n") : void 0;
-      error(first ?? error2, hint);
-    }
-    if (hasErrors) {
-      info(
-        `Partial restore: ${result.totalRows} rows across ${result.tables.length} tables (${result.errors.length} table(s) failed)`
-      );
-    } else {
-      success(
-        `Restore complete (${result.totalRows} rows across ${result.tables.length} tables)`
-      );
-    }
-    const postChoice = await askPostRestoreChoice();
-    if (postChoice === "delete") {
-      await deleteDump(inputDir);
-      info("Dump files deleted.");
-    } else if (postChoice === "archive") {
-      const archivePath = await archiveDump(inputDir, name);
-      info(`Archived to ${archivePath}`);
-    }
-  } catch (err) {
-    handleError(err, { profile: name });
     process.exit(1);
   }
 });
