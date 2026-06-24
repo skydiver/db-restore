@@ -22,26 +22,26 @@ ORM migration resets (`prisma migrate reset`, `drizzle-kit push --force-reset`, 
 
 ```bash
 # Create a profile (one-time)
-npx github:skydiver/db-restore setup myproject
+pnpx github:skydiver/db-restore setup myproject
 
 # Before migration reset: dump your data
-npx github:skydiver/db-restore myproject dump
+pnpx github:skydiver/db-restore myproject dump
 
 # Run your ORM reset
 prisma migrate reset   # or drizzle-kit push --force-reset, etc.
 
 # After migration reset: restore your data
-npx github:skydiver/db-restore myproject restore
+pnpx github:skydiver/db-restore myproject restore
 ```
 
 ## Commands
 
 ```
-db-restore setup <name>                Create a new database profile interactively
-db-restore <name> dump [--out <dir>]   Dump all tables to JSON
-db-restore <name> restore [--in <dir>] Restore tables from JSON dump
-db-restore profiles                    List all saved profiles
-db-restore remove <name>               Delete a profile
+pnpx github:skydiver/db-restore setup <name>                Create a new database profile interactively
+pnpx github:skydiver/db-restore <name> dump [--out <dir>]   Dump all tables to JSON
+pnpx github:skydiver/db-restore <name> restore [--in <dir>] Restore tables from JSON dump
+pnpx github:skydiver/db-restore profiles                    List all saved profiles
+pnpx github:skydiver/db-restore remove <name>               Delete a profile
 ```
 
 ### `setup`
@@ -49,7 +49,7 @@ db-restore remove <name>               Delete a profile
 Interactive profile creation. Prompts for connection details, tests the connection, and saves the profile. Passwords are never stored — they're prompted before each dump/restore.
 
 ```
-$ db-restore setup myproject
+$ pnpx github:skydiver/db-restore setup myproject
 
 ? Provider: postgres
 ? Host: localhost
@@ -67,7 +67,7 @@ Profile "myproject" saved.
 Connects to the database, discovers all tables (excluding ORM migration tables), and writes each table's data to a JSON file.
 
 ```
-$ db-restore myproject dump
+$ pnpx github:skydiver/db-restore myproject dump
 
 ┌──────────┬──────┐
 │ Table    │ Rows │
@@ -89,7 +89,7 @@ If a previous dump exists, you'll be asked to archive it (`.tar.gz`), discard it
 Reads the dump files and writes data back using UPSERT — your development data is merged with any new seed data from migrations.
 
 ```
-$ db-restore myproject restore
+$ pnpx github:skydiver/db-restore myproject restore
 
 ┌──────────┬──────┬──────────┐
 │ Table    │ Rows │ Strategy │
