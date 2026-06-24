@@ -135,7 +135,7 @@ async function runRestore(name: string, opts: { in?: string; verbose: boolean })
 program
   .name('db-restore')
   .description('Database backup & restore for local development')
-  .version('1.0.4')
+  .version('1.1.0')
   .argument('[name]', 'profile name')
   .argument('[action]', 'action to run: dump or restore')
   .option('--out <dir>', 'Dump output directory (default: ~/.config/db-restore/dumps/<name>)')

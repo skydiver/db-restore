@@ -1,6 +1,6 @@
 {
   "name": "db-restore",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "description": "Database backup & restore for local development",
   "license": "MIT",
   "author": {
@@ -23,10 +23,10 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.10",
+    "@biomejs/biome": "2.5.1",
     "@tsconfig/node24": "^24.0.4",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^25.9.4",
+    "@types/node": "^26.0.1",
     "@types/pg": "^8.20.0",
     "@vitest/coverage-v8": "^4.1.9",
     "globals": "^17.7.0",
@@ -50,7 +50,7 @@
     "better-sqlite3": "^12.11.1",
     "chalk": "^5.6.2",
     "cli-table3": "^0.6.5",
-    "commander": "^14.0.3",
+    "commander": "^15.0.0",
     "mysql2": "^3.22.5",
     "ora": "^9.4.1",
     "pg": "^8.22.0"
