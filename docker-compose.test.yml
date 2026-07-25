@@ -1,0 +1,41 @@
+# Databases for the integration test suites. Driven entirely by `pnpm test:db`,
+# which starts these containers, waits for health, runs vitest, and tears them
+# down again (volumes included) whether or not the tests pass.
+#
+# Ports are deliberately off the defaults so a database you already run
+# locally on 5432/3306 keeps its port. The suites read PGPORT/MYSQL_PORT
+# (see the `test:db` script), and skip themselves when nothing answers.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - '5433:5432'
+    # tmpfs: the suite drops and recreates its database each run, so there is
+    # nothing worth persisting between runs.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql
+      MYSQL_DATABASE: db_restore_test
+    ports:
+      - '3307:3306'
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-pmysql']
+      interval: 2s
+      timeout: 3s
+      retries: 30

@@ -24,10 +24,15 @@ export class MysqlProvider implements DatabaseProvider {
     return this.connection;
   }
 
+  /**
+   * `information_schema` columns are aliased explicitly throughout this class:
+   * MySQL 8 labels them uppercase (TABLE_NAME) in the result set, so reading
+   * `row.table_name` without an alias yields undefined.
+   */
   async getTables(): Promise<string[]> {
     const conn = this.getConnection();
     const [rows] = await conn.query(
-      "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
+      "SELECT table_name AS table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
     );
     return (rows as { table_name: string }[]).map((r) => r.table_name);
   }
@@ -41,7 +46,7 @@ export class MysqlProvider implements DatabaseProvider {
   async getColumns(table: string): Promise<Column[]> {
     const conn = this.getConnection();
     const [rows] = await conn.query(
-      `SELECT column_name, data_type FROM information_schema.columns
+      `SELECT column_name AS column_name, data_type AS data_type FROM information_schema.columns
        WHERE table_name = ? AND table_schema = DATABASE()
          AND (generation_expression IS NULL OR generation_expression = '')
        ORDER BY ordinal_position`,
@@ -56,7 +61,7 @@ export class MysqlProvider implements DatabaseProvider {
   async getPrimaryKeys(table: string): Promise<string[]> {
     const conn = this.getConnection();
     const [rows] = await conn.query(
-      "SELECT column_name FROM information_schema.key_column_usage WHERE table_name = ? AND table_schema = DATABASE() AND constraint_name = 'PRIMARY'",
+      "SELECT column_name AS column_name FROM information_schema.key_column_usage WHERE table_name = ? AND table_schema = DATABASE() AND constraint_name = 'PRIMARY'",
       [table]
     );
     return (rows as { column_name: string }[]).map((r) => r.column_name);

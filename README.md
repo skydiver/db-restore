@@ -251,10 +251,23 @@ SQLite profiles store the file path instead of connection details:
 pnpm install
 pnpm dev          # Watch mode with tsx
 pnpm test         # Run tests with Vitest
+pnpm test:db      # Run tests against throwaway Postgres + MySQL containers
 pnpm typecheck    # Type check with tsc
 pnpm lint         # Lint with Biome
 pnpm build        # Bundle with tsup
 ```
+
+### Database tests
+
+The Postgres and MySQL provider suites need a real server, and skip themselves
+when none is reachable — so plain `pnpm test` passes without any database
+installed, silently covering less.
+
+`pnpm test:db` closes that gap: it starts the containers in
+`docker-compose.test.yml`, waits for both to report healthy, runs the full
+suite against them, and tears them down (volumes included) whether or not the
+tests passed. Ports are 5433 (Postgres) and 3307 (MySQL) so a database already
+running locally on the default port is left alone. Requires Docker.
 
 ## License
 

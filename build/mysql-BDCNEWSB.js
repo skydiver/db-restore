@@ -19,10 +19,15 @@ var MysqlProvider = class {
     if (!this.connection) throw new Error("Not connected");
     return this.connection;
   }
+  /**
+   * `information_schema` columns are aliased explicitly throughout this class:
+   * MySQL 8 labels them uppercase (TABLE_NAME) in the result set, so reading
+   * `row.table_name` without an alias yields undefined.
+   */
   async getTables() {
     const conn = this.getConnection();
     const [rows] = await conn.query(
-      "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
+      "SELECT table_name AS table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
     );
     return rows.map((r) => r.table_name);
   }
@@ -35,7 +40,7 @@ var MysqlProvider = class {
   async getColumns(table) {
     const conn = this.getConnection();
     const [rows] = await conn.query(
-      `SELECT column_name, data_type FROM information_schema.columns
+      `SELECT column_name AS column_name, data_type AS data_type FROM information_schema.columns
        WHERE table_name = ? AND table_schema = DATABASE()
          AND (generation_expression IS NULL OR generation_expression = '')
        ORDER BY ordinal_position`,
@@ -49,7 +54,7 @@ var MysqlProvider = class {
   async getPrimaryKeys(table) {
     const conn = this.getConnection();
     const [rows] = await conn.query(
-      "SELECT column_name FROM information_schema.key_column_usage WHERE table_name = ? AND table_schema = DATABASE() AND constraint_name = 'PRIMARY'",
+      "SELECT column_name AS column_name FROM information_schema.key_column_usage WHERE table_name = ? AND table_schema = DATABASE() AND constraint_name = 'PRIMARY'",
       [table]
     );
     return rows.map((r) => r.column_name);
