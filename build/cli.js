@@ -496,11 +496,11 @@ async function createProvider(provider) {
       return new SqliteProvider();
     }
     case "postgres": {
-      const { PostgresProvider } = await import("./postgres-TLRWRXH6.js");
+      const { PostgresProvider } = await import("./postgres-2JOHPUMY.js");
       return new PostgresProvider();
     }
     case "mysql": {
-      const { MysqlProvider } = await import("./mysql-A54P5RBU.js");
+      const { MysqlProvider } = await import("./mysql-MWWR6TCC.js");
       return new MysqlProvider();
     }
     default:
@@ -765,7 +765,7 @@ async function runRestore(name, opts) {
     info(`Archived to ${archivePath}`);
   }
 }
-program.name("db-restore").description("Database backup & restore for local development").version("1.2.0").argument("[name]", "profile name").argument("[action]", "action to run: dump or restore").option("--out <dir>", "Dump output directory (default: ~/.config/db-restore/dumps/<name>)").option("--in <dir>", "Restore input directory (default: ~/.config/db-restore/dumps/<name>)").option("--verbose", "Show detailed output", false).hook("preAction", () => printHeader()).action(
+program.name("db-restore").description("Database backup & restore for local development").version("1.2.1").argument("[name]", "profile name").argument("[action]", "action to run: dump or restore").option("--out <dir>", "Dump output directory (default: ~/.config/db-restore/dumps/<name>)").option("--in <dir>", "Restore input directory (default: ~/.config/db-restore/dumps/<name>)").option("--verbose", "Show detailed output", false).hook("preAction", () => printHeader()).action(
   async (name, action, opts) => {
     if (!name) {
       program.help();

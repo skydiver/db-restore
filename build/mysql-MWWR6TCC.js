@@ -26,10 +26,19 @@ var MysqlProvider = class {
     );
     return rows.map((r) => r.table_name);
   }
+  /**
+   * Generated columns are excluded — MySQL rejects an INSERT that names one.
+   * The filter tests `generation_expression` rather than `extra`, because
+   * `extra` reads `DEFAULT_GENERATED` for ordinary columns with an expression
+   * default (e.g. `CURRENT_TIMESTAMP`), which must still be restored.
+   */
   async getColumns(table) {
     const conn = this.getConnection();
     const [rows] = await conn.query(
-      "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ? AND table_schema = DATABASE() ORDER BY ordinal_position",
+      `SELECT column_name, data_type FROM information_schema.columns
+       WHERE table_name = ? AND table_schema = DATABASE()
+         AND (generation_expression IS NULL OR generation_expression = '')
+       ORDER BY ordinal_position`,
       [table]
     );
     return rows.map((r) => ({

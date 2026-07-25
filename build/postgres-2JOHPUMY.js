@@ -27,10 +27,18 @@ var PostgresProvider = class {
     );
     return result.rows.map((r) => r.tablename);
   }
+  /**
+   * Generated columns (`GENERATED ALWAYS AS (...) STORED`) are excluded: the
+   * database computes them, and an INSERT naming one fails with "cannot
+   * insert a non-DEFAULT value into column". They are derived from columns
+   * that are dumped, so nothing is lost — the value is recomputed on restore.
+   */
   async getColumns(table) {
     const client = this.getClient();
     const result = await client.query(
-      "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = $1 ORDER BY ordinal_position",
+      `SELECT column_name, data_type FROM information_schema.columns
+       WHERE table_name = $1 AND is_generated <> 'ALWAYS'
+       ORDER BY ordinal_position`,
       [table]
     );
     return result.rows.map((r) => ({
