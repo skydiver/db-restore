@@ -1,4 +1,4 @@
-import { createConnection, type Connection } from 'mysql2/promise';
+import { type Connection, createConnection } from 'mysql2/promise';
 import type { Column, ConnectionConfig, DatabaseProvider } from './types.js';
 
 export class MysqlProvider implements DatabaseProvider {
@@ -74,9 +74,7 @@ export class MysqlProvider implements DatabaseProvider {
     if (rows.length === 0) return;
 
     const colNames = columns.map((c) => c.name);
-    const jsonCols = new Set(
-      columns.filter((c) => c.type === 'json').map((c) => c.name)
-    );
+    const jsonCols = new Set(columns.filter((c) => c.type === 'json').map((c) => c.name));
 
     for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
       const row = rows[rowIndex]!;

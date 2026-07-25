@@ -113,9 +113,7 @@ export class PostgresProvider implements DatabaseProvider {
       } catch (err) {
         const original = err instanceof Error ? err.message : String(err);
         const details = this.buildErrorDetails(original, columns, values);
-        throw new Error(
-          `Restoring table "${table}" (row ${rowIndex}): ${original}${details}`
-        );
+        throw new Error(`Restoring table "${table}" (row ${rowIndex}): ${original}${details}`);
       }
     }
   }

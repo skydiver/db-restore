@@ -308,9 +308,7 @@ async function executeRestore(provider, inputDir) {
           if (currentColNames.has(col.name)) {
             matchingColumns.push(col);
           } else {
-            result.warnings.push(
-              `Skipping removed column "${col.name}" in table "${tableName}"`
-            );
+            result.warnings.push(`Skipping removed column "${col.name}" in table "${tableName}"`);
           }
         }
         for (const col of currentColumns) {
@@ -414,11 +412,11 @@ async function createProvider(provider) {
       return new SqliteProvider();
     }
     case "postgres": {
-      const { PostgresProvider } = await import("./postgres-ZX6RFX4J.js");
+      const { PostgresProvider } = await import("./postgres-TLRWRXH6.js");
       return new PostgresProvider();
     }
     case "mysql": {
-      const { MysqlProvider } = await import("./mysql-PY7DALT2.js");
+      const { MysqlProvider } = await import("./mysql-A54P5RBU.js");
       return new MysqlProvider();
     }
     default:

@@ -45,9 +45,7 @@ export async function executeRestore(
           if (currentColNames.has(col.name)) {
             matchingColumns.push(col);
           } else {
-            result.warnings.push(
-              `Skipping removed column "${col.name}" in table "${tableName}"`
-            );
+            result.warnings.push(`Skipping removed column "${col.name}" in table "${tableName}"`);
           }
         }
 
