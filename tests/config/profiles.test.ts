@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -86,6 +86,19 @@ describe('profiles', () => {
 
       expect(dirStat.mode & 0o777).toBe(0o700);
       expect(fileStat.mode & 0o777).toBe(0o600);
+    }
+  );
+
+  it.runIf(process.platform !== 'win32')(
+    'tightens a pre-existing profiles directory created with a looser mode',
+    async () => {
+      const profilesDir = join(tempDir, 'loose-profiles');
+      await mkdir(profilesDir, { mode: 0o755 });
+
+      await saveProfile(pgProfile, profilesDir);
+
+      const dirStat = await stat(profilesDir);
+      expect(dirStat.mode & 0o777).toBe(0o700);
     }
   );
 

@@ -65,8 +65,20 @@ function encodeRow(row, jsonColumns) {
 
 // src/utils/files.ts
 import { existsSync } from "fs";
-import { chmod, mkdir, readdir, readFile, writeFile } from "fs/promises";
+import { chmod as chmod2, lstat, readdir, readFile, writeFile } from "fs/promises";
 import { resolve, sep } from "path";
+
+// src/utils/dir-mode.ts
+import { chmod, mkdir } from "fs/promises";
+async function ensureDir(dir, mode) {
+  await mkdir(dir, { recursive: true, mode });
+  try {
+    await chmod(dir, mode);
+  } catch (err) {
+    const code = err.code;
+    if (code !== "EPERM" && code !== "EACCES") throw err;
+  }
+}
 
 // src/utils/table-name.ts
 var SAFE_CHAR = /^[A-Za-z0-9_.-]$/;
@@ -108,28 +120,36 @@ function resolveWithinDir(dir, filename) {
   return filePath;
 }
 async function writeTableDump(dump, dir) {
-  await mkdir(dir, { recursive: true, mode: DIR_MODE });
+  await ensureDir(dir, DIR_MODE);
   const filename = `${toSafeFilename(dump.table)}.json`;
   const filePath = resolveWithinDir(dir, filename);
   await writeFile(filePath, JSON.stringify(dump, null, 2), { encoding: "utf-8", mode: FILE_MODE });
-  await chmod(filePath, FILE_MODE);
+  await chmod2(filePath, FILE_MODE);
+}
+async function assertRegularFile(filePath) {
+  const stats = await lstat(filePath);
+  if (!stats.isFile()) {
+    throw new Error(`Refusing to read "${filePath}": not a regular file`);
+  }
 }
 async function readTableDump(filename, dir) {
   const filePath = resolveWithinDir(dir, filename);
+  await assertRegularFile(filePath);
   const content = await readFile(filePath, "utf-8");
   return JSON.parse(content);
 }
 async function writeMetadata(metadata, dir) {
-  await mkdir(dir, { recursive: true, mode: DIR_MODE });
+  await ensureDir(dir, DIR_MODE);
   const filePath = resolveWithinDir(dir, METADATA_FILENAME);
   await writeFile(filePath, JSON.stringify(metadata, null, 2), {
     encoding: "utf-8",
     mode: FILE_MODE
   });
-  await chmod(filePath, FILE_MODE);
+  await chmod2(filePath, FILE_MODE);
 }
 async function readMetadata(dir) {
   const filePath = resolveWithinDir(dir, METADATA_FILENAME);
+  await assertRegularFile(filePath);
   const content = await readFile(filePath, "utf-8");
   return JSON.parse(content);
 }
@@ -141,6 +161,8 @@ async function getTableFiles(dir) {
   const jsonFiles = files.filter((f) => f.endsWith(".json") && f !== METADATA_FILENAME);
   const entries = [];
   for (const file of jsonFiles) {
+    const stats = await lstat(resolveWithinDir(dir, file));
+    if (!stats.isFile()) continue;
     const dump = await readTableDump(file, dir);
     entries.push({ file, table: dump.table });
   }
@@ -182,7 +204,7 @@ async function executeDump(provider, providerName, outputDir) {
 
 // src/config/profiles.ts
 import { existsSync as existsSync2 } from "fs";
-import { chmod as chmod2, mkdir as mkdir2, readdir as readdir2, readFile as readFile2, rm, writeFile as writeFile2 } from "fs/promises";
+import { chmod as chmod3, readdir as readdir2, readFile as readFile2, rm, writeFile as writeFile2 } from "fs/promises";
 import { join as join2 } from "path";
 var DIR_MODE2 = 448;
 var FILE_MODE2 = 384;
@@ -192,13 +214,13 @@ function resolveDir(configDir) {
 }
 async function saveProfile(profile, configDir) {
   const dir = resolveDir(configDir);
-  await mkdir2(dir, { recursive: true, mode: DIR_MODE2 });
+  await ensureDir(dir, DIR_MODE2);
   const filePath = join2(dir, `${profile.name}.json`);
   await writeFile2(filePath, JSON.stringify(profile, null, 2), {
     encoding: "utf-8",
     mode: FILE_MODE2
   });
-  await chmod2(filePath, FILE_MODE2);
+  await chmod3(filePath, FILE_MODE2);
 }
 async function loadProfile(name, configDir) {
   const dir = resolveDir(configDir);
@@ -620,7 +642,7 @@ function printHeader() {
 
 // src/utils/archive.ts
 import { execFile } from "child_process";
-import { chmod as chmod3, mkdir as mkdir3, readdir as readdir3, rm as rm2 } from "fs/promises";
+import { chmod as chmod4, readdir as readdir3, rm as rm2 } from "fs/promises";
 import { join as join4 } from "path";
 import { promisify } from "util";
 var execFileAsync = promisify(execFile);
@@ -630,7 +652,7 @@ function isSafeArchiveEntry(filename) {
   return !filename.startsWith("-") && !filename.includes("/") && !filename.includes("\\");
 }
 async function archiveDump(dumpDir, profileName) {
-  await mkdir3(ARCHIVE_DIR, { recursive: true, mode: ARCHIVE_DIR_MODE });
+  await ensureDir(ARCHIVE_DIR, ARCHIVE_DIR_MODE);
   const now = /* @__PURE__ */ new Date();
   const date = now.toISOString().slice(0, 10).replace(/-/g, "");
   const time = now.toISOString().slice(11, 19).replace(/:/g, "");
@@ -639,7 +661,7 @@ async function archiveDump(dumpDir, profileName) {
   const files = await readdir3(dumpDir);
   const jsonFiles = files.filter((f) => f.endsWith(".json") && isSafeArchiveEntry(f));
   await execFileAsync("tar", ["-czf", archivePath, "-C", dumpDir, "--", ...jsonFiles]);
-  await chmod3(archivePath, ARCHIVE_FILE_MODE);
+  await chmod4(archivePath, ARCHIVE_FILE_MODE);
   for (const file of jsonFiles) {
     await rm2(join4(dumpDir, file));
   }

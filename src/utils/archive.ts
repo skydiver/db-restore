@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
-import { chmod, mkdir, readdir, rm } from 'node:fs/promises';
+import { chmod, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { ARCHIVE_DIR } from '../constants.js';
+import { ensureDir } from './dir-mode.js';
 
 const execFileAsync = promisify(execFile);
 const ARCHIVE_DIR_MODE = 0o700;
@@ -20,7 +21,7 @@ function isSafeArchiveEntry(filename: string): boolean {
 }
 
 export async function archiveDump(dumpDir: string, profileName: string): Promise<string> {
-  await mkdir(ARCHIVE_DIR, { recursive: true, mode: ARCHIVE_DIR_MODE });
+  await ensureDir(ARCHIVE_DIR, ARCHIVE_DIR_MODE);
 
   const now = new Date();
   const date = now.toISOString().slice(0, 10).replace(/-/g, '');

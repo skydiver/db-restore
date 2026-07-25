@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -112,6 +112,51 @@ describe('dump file I/O', () => {
   });
 });
 
+describe('symlinked dump entries', () => {
+  let tempDir: string;
+  let secretPath: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'db-restore-symlink-'));
+    secretPath = join(tempDir, 'secret.txt');
+    await writeFile(secretPath, JSON.stringify({ table: 'users', rows: [{ id: 1 }] }));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true });
+  });
+
+  it.runIf(process.platform !== 'win32')('refuses to read a symlinked dump file', async () => {
+    const dumpDir = join(tempDir, 'dump');
+    await mkdir(dumpDir, { recursive: true });
+    await symlink(secretPath, join(dumpDir, 'users.json'));
+
+    await expect(readTableDump('users.json', dumpDir)).rejects.toThrow('not a regular file');
+  });
+
+  it.runIf(process.platform !== 'win32')(
+    'skips symlinked entries when listing dumps but keeps regular ones',
+    async () => {
+      const dumpDir = join(tempDir, 'dump');
+      await mkdir(dumpDir, { recursive: true });
+      await symlink(secretPath, join(dumpDir, 'stolen.json'));
+      await writeTableDump(
+        {
+          table: 'orders',
+          primaryKeys: ['id'],
+          columns: [{ name: 'id', type: 'int' }],
+          rows: [{ id: 1 }],
+        },
+        dumpDir
+      );
+
+      const entries = await getTableFiles(dumpDir);
+
+      expect(entries.map((e) => e.table)).toEqual(['orders']);
+    }
+  );
+});
+
 describe('file permissions', () => {
   let tempDir: string;
 
@@ -143,6 +188,21 @@ describe('file permissions', () => {
 
       expect(dirStat.mode & 0o777).toBe(0o700);
       expect(fileStat.mode & 0o777).toBe(0o600);
+    }
+  );
+
+  it.runIf(process.platform !== 'win32')(
+    'tightens a pre-existing dump directory created with a looser mode',
+    async () => {
+      // mkdir ignores `mode` on an existing directory, so installs that
+      // predate the hardening keep their original 0755 without the chmod.
+      const dumpDir = join(tempDir, 'dumps');
+      await mkdir(dumpDir, { mode: 0o755 });
+
+      await writeTableDump(tableDump, dumpDir);
+
+      const dirStat = await stat(dumpDir);
+      expect(dirStat.mode & 0o777).toBe(0o700);
     }
   );
 

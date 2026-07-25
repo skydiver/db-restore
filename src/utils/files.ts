@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, lstat, readdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { METADATA_FILENAME } from '../constants.js';
 import type { DumpMetadata, TableDump } from '../providers/types.js';
+import { ensureDir } from './dir-mode.js';
 import { toSafeFilename } from './table-name.js';
 
 const DIR_MODE = 0o700;
@@ -23,7 +24,7 @@ function resolveWithinDir(dir: string, filename: string): string {
 }
 
 export async function writeTableDump(dump: TableDump, dir: string): Promise<void> {
-  await mkdir(dir, { recursive: true, mode: DIR_MODE });
+  await ensureDir(dir, DIR_MODE);
   const filename = `${toSafeFilename(dump.table)}.json`;
   const filePath = resolveWithinDir(dir, filename);
   await writeFile(filePath, JSON.stringify(dump, null, 2), { encoding: 'utf-8', mode: FILE_MODE });
@@ -32,14 +33,27 @@ export async function writeTableDump(dump: TableDump, dir: string): Promise<void
   await chmod(filePath, FILE_MODE);
 }
 
+/**
+ * `resolveWithinDir` compares path strings, which a symlink sidesteps: an
+ * entry inside `dir` can point anywhere the process can read. Dump
+ * directories may come from `--in`, so entries must be regular files.
+ */
+async function assertRegularFile(filePath: string): Promise<void> {
+  const stats = await lstat(filePath);
+  if (!stats.isFile()) {
+    throw new Error(`Refusing to read "${filePath}": not a regular file`);
+  }
+}
+
 export async function readTableDump(filename: string, dir: string): Promise<TableDump> {
   const filePath = resolveWithinDir(dir, filename);
+  await assertRegularFile(filePath);
   const content = await readFile(filePath, 'utf-8');
   return JSON.parse(content) as TableDump;
 }
 
 export async function writeMetadata(metadata: DumpMetadata, dir: string): Promise<void> {
-  await mkdir(dir, { recursive: true, mode: DIR_MODE });
+  await ensureDir(dir, DIR_MODE);
   const filePath = resolveWithinDir(dir, METADATA_FILENAME);
   await writeFile(filePath, JSON.stringify(metadata, null, 2), {
     encoding: 'utf-8',
@@ -50,6 +64,7 @@ export async function writeMetadata(metadata: DumpMetadata, dir: string): Promis
 
 export async function readMetadata(dir: string): Promise<DumpMetadata> {
   const filePath = resolveWithinDir(dir, METADATA_FILENAME);
+  await assertRegularFile(filePath);
   const content = await readFile(filePath, 'utf-8');
   return JSON.parse(content) as DumpMetadata;
 }
@@ -70,6 +85,12 @@ export async function getTableFiles(dir: string): Promise<TableFileEntry[]> {
 
   const entries: TableFileEntry[] = [];
   for (const file of jsonFiles) {
+    // Symlinks and other non-regular entries are excluded from the listing
+    // rather than aborting it — one hostile entry shouldn't make an
+    // otherwise valid dump directory unrestorable.
+    const stats = await lstat(resolveWithinDir(dir, file));
+    if (!stats.isFile()) continue;
+
     const dump = await readTableDump(file, dir);
     entries.push({ file, table: dump.table });
   }

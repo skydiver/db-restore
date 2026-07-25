@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CONFIG_BASE_DIR } from '../constants.js';
 import type { AnyProfileConfig } from '../providers/types.js';
+import { ensureDir } from '../utils/dir-mode.js';
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
@@ -14,7 +15,7 @@ function resolveDir(configDir?: string): string {
 
 export async function saveProfile(profile: AnyProfileConfig, configDir?: string): Promise<void> {
   const dir = resolveDir(configDir);
-  await mkdir(dir, { recursive: true, mode: DIR_MODE });
+  await ensureDir(dir, DIR_MODE);
   const filePath = join(dir, `${profile.name}.json`);
   await writeFile(filePath, JSON.stringify(profile, null, 2), {
     encoding: 'utf-8',
