@@ -24,6 +24,13 @@ describe('SqliteProvider', () => {
         id TEXT PRIMARY KEY,
         migration_name TEXT
       );
+      CREATE TABLE line_items (
+        id INTEGER PRIMARY KEY,
+        quantity INTEGER NOT NULL,
+        unit_price REAL NOT NULL,
+        total REAL GENERATED ALWAYS AS (quantity * unit_price) STORED
+      );
+      INSERT INTO line_items (id, quantity, unit_price) VALUES (1, 2, 10.0);
       INSERT INTO users (id, name, email, created_at) VALUES
         (1, 'Alice', 'alice@test.com', '2026-01-15T10:30:00.000Z'),
         (2, 'Bob', 'bob@test.com', '2026-01-16T11:00:00.000Z');
@@ -57,6 +64,26 @@ describe('SqliteProvider', () => {
         { name: 'email', type: 'TEXT' },
         { name: 'created_at', type: 'TEXT' },
       ]);
+    });
+
+    it('excludes generated columns, which the database computes on write', async () => {
+      const columns = await provider.getColumns('line_items');
+      expect(columns.map((c) => c.name)).toEqual(['id', 'quantity', 'unit_price']);
+    });
+
+    it('upserts a row into a table that has a generated column', async () => {
+      const columns = await provider.getColumns('line_items');
+
+      await provider.upsertRows(
+        'line_items',
+        columns,
+        ['id'],
+        [{ id: 1, quantity: 3, unit_price: 20.0 }]
+      );
+
+      const rows = (await provider.getRows('line_items')) as Record<string, unknown>[];
+      const row = rows.find((r) => r['id'] === 1) as Record<string, unknown>;
+      expect(row['total']).toBe(60);
     });
   });
 

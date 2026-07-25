@@ -3,12 +3,14 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { PostgresProvider } from '../../src/providers/postgres.js';
 
 const TEST_DB = 'db_restore_test';
+// Overridable so the suite can run against any local Postgres (e.g. a project
+// container) instead of only a postgres/postgres one.
 const TEST_CONFIG = {
-  host: 'localhost',
-  port: 5432,
+  host: process.env['PGHOST'] ?? 'localhost',
+  port: Number(process.env['PGPORT'] ?? 5432),
   database: TEST_DB,
-  user: 'postgres',
-  password: 'postgres',
+  user: process.env['PGUSER'] ?? 'postgres',
+  password: process.env['PGPASSWORD'] ?? 'postgres',
 };
 
 async function isPostgresAvailable(): Promise<boolean> {
@@ -46,6 +48,14 @@ describe.skipIf(!pgAvailable)('PostgresProvider', () => {
       );
       INSERT INTO users (name, email) VALUES ('Alice', 'alice@test.com');
       INSERT INTO users (name, email) VALUES ('Bob', 'bob@test.com');
+
+      CREATE TABLE line_items (
+        id SERIAL PRIMARY KEY,
+        quantity INTEGER NOT NULL,
+        unit_price NUMERIC NOT NULL,
+        total NUMERIC GENERATED ALWAYS AS (quantity * unit_price) STORED
+      );
+      INSERT INTO line_items (quantity, unit_price) VALUES (2, 10.00);
     `);
     await setupClient.end();
   });
@@ -74,6 +84,28 @@ describe.skipIf(!pgAvailable)('PostgresProvider', () => {
   it('gets columns', async () => {
     const columns = await provider.getColumns('users');
     expect(columns.map((c) => c.name)).toEqual(['id', 'name', 'email']);
+  });
+
+  it('excludes generated columns, which the database computes and refuses inserts into', async () => {
+    const columns = await provider.getColumns('line_items');
+    expect(columns.map((c) => c.name)).toEqual(['id', 'quantity', 'unit_price']);
+  });
+
+  it('upserts a row into a table that has a generated column', async () => {
+    const columns = await provider.getColumns('line_items');
+
+    await provider.upsertRows(
+      'line_items',
+      columns,
+      ['id'],
+      [{ id: 1, quantity: 3, unit_price: '20.00' }]
+    );
+
+    const rows = (await provider.getRows('line_items')) as Record<string, unknown>[];
+    const row = rows.find((r) => r['id'] === 1) as Record<string, unknown>;
+    expect(row['quantity']).toBe(3);
+    // Recomputed by the database, not restored from the dump.
+    expect(Number(row['total'])).toBe(60);
   });
 
   it('gets primary keys', async () => {
