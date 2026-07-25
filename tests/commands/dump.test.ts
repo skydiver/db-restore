@@ -40,7 +40,7 @@ describe('dump command', () => {
     expect(metadata.provider).toBe('sqlite');
     expect(metadata.tables).toEqual(['users']);
 
-    const tableDump = await readTableDump('users', tempDir);
+    const tableDump = await readTableDump('users.json', tempDir);
     expect(tableDump.rows).toHaveLength(2);
     expect(tableDump.primaryKeys).toEqual(['id']);
   });

@@ -15,16 +15,16 @@ export async function executeRestore(
   inputDir: string
 ): Promise<RestoreResult> {
   await readMetadata(inputDir);
-  const tableNames = await getTableFiles(inputDir);
+  const tableFiles = await getTableFiles(inputDir);
 
   const result: RestoreResult = { tables: [], totalRows: 0, warnings: [], errors: [] };
 
   await provider.disableForeignKeys();
 
   try {
-    for (const tableName of tableNames) {
+    for (const { file, table: tableName } of tableFiles) {
       try {
-        const dump = await readTableDump(tableName, inputDir);
+        const dump = await readTableDump(file, inputDir);
 
         // Check if table exists in current DB
         const currentTables = await provider.getTables();

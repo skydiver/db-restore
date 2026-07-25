@@ -1,8 +1,11 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CONFIG_BASE_DIR } from '../constants.js';
 import type { AnyProfileConfig } from '../providers/types.js';
+
+const DIR_MODE = 0o700;
+const FILE_MODE = 0o600;
 
 function resolveDir(configDir?: string): string {
   if (configDir) return configDir;
@@ -11,9 +14,15 @@ function resolveDir(configDir?: string): string {
 
 export async function saveProfile(profile: AnyProfileConfig, configDir?: string): Promise<void> {
   const dir = resolveDir(configDir);
-  await mkdir(dir, { recursive: true });
+  await mkdir(dir, { recursive: true, mode: DIR_MODE });
   const filePath = join(dir, `${profile.name}.json`);
-  await writeFile(filePath, JSON.stringify(profile, null, 2), 'utf-8');
+  await writeFile(filePath, JSON.stringify(profile, null, 2), {
+    encoding: 'utf-8',
+    mode: FILE_MODE,
+  });
+  // `mode` on writeFile only applies at creation time; force it on every
+  // write so an overwritten profile doesn't keep a looser inherited mode.
+  await chmod(filePath, FILE_MODE);
 }
 
 export async function loadProfile(name: string, configDir?: string): Promise<AnyProfileConfig> {

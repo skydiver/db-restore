@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -72,4 +72,31 @@ describe('profiles', () => {
   it('throws when loading a non-existent profile', async () => {
     await expect(loadProfile('nope', tempDir)).rejects.toThrow();
   });
+
+  it.runIf(process.platform !== 'win32')(
+    'creates the profiles directory and file with restrictive permissions',
+    async () => {
+      // Must not pre-exist: mkdtemp already creates dirs at 0700, so asserting
+      // against it would pass even without the explicit mode.
+      const profilesDir = join(tempDir, 'profiles');
+      await saveProfile(pgProfile, profilesDir);
+
+      const dirStat = await stat(profilesDir);
+      const fileStat = await stat(join(profilesDir, `${pgProfile.name}.json`));
+
+      expect(dirStat.mode & 0o777).toBe(0o700);
+      expect(fileStat.mode & 0o777).toBe(0o600);
+    }
+  );
+
+  it.runIf(process.platform !== 'win32')(
+    'restricts permissions even when overwriting an existing profile file',
+    async () => {
+      await saveProfile(pgProfile, tempDir);
+      await saveProfile({ ...pgProfile, database: 'otherdb' }, tempDir);
+
+      const fileStat = await stat(join(tempDir, `${pgProfile.name}.json`));
+      expect(fileStat.mode & 0o777).toBe(0o600);
+    }
+  );
 });

@@ -65,34 +65,86 @@ function encodeRow(row, jsonColumns) {
 
 // src/utils/files.ts
 import { existsSync } from "fs";
-import { mkdir, readdir, readFile, writeFile } from "fs/promises";
-import { join as join2 } from "path";
-async function writeTableDump(dump, dir) {
-  await mkdir(dir, { recursive: true });
-  const filePath = join2(dir, `${dump.table}.json`);
-  await writeFile(filePath, JSON.stringify(dump, null, 2), "utf-8");
+import { chmod, mkdir, readdir, readFile, writeFile } from "fs/promises";
+import { resolve, sep } from "path";
+
+// src/utils/table-name.ts
+var SAFE_CHAR = /^[A-Za-z0-9_.-]$/;
+function percentEncodeChar(char) {
+  const bytes = Buffer.from(char, "utf-8");
+  return Array.from(bytes).map((byte) => `%${byte.toString(16).toUpperCase().padStart(2, "0")}`).join("");
 }
-async function readTableDump(table, dir) {
-  const filePath = join2(dir, `${table}.json`);
+function toSafeFilename(table) {
+  if (table.length === 0) {
+    throw new Error("Table name must not be empty");
+  }
+  let encoded = "";
+  for (const char of table) {
+    encoded += SAFE_CHAR.test(char) ? char : percentEncodeChar(char);
+  }
+  if (encoded.startsWith("-")) {
+    encoded = `%2D${encoded.slice(1)}`;
+  }
+  if (encoded === ".") {
+    encoded = "%2E";
+  } else if (encoded === "..") {
+    encoded = "%2E%2E";
+  }
+  if (encoded.length === 0) {
+    throw new Error("Table name produces an empty filename");
+  }
+  return encoded;
+}
+
+// src/utils/files.ts
+var DIR_MODE = 448;
+var FILE_MODE = 384;
+function resolveWithinDir(dir, filename) {
+  const resolvedDir = resolve(dir);
+  const filePath = resolve(resolvedDir, filename);
+  if (filePath !== resolvedDir && !filePath.startsWith(resolvedDir + sep)) {
+    throw new Error(`Resolved path "${filePath}" escapes directory "${resolvedDir}"`);
+  }
+  return filePath;
+}
+async function writeTableDump(dump, dir) {
+  await mkdir(dir, { recursive: true, mode: DIR_MODE });
+  const filename = `${toSafeFilename(dump.table)}.json`;
+  const filePath = resolveWithinDir(dir, filename);
+  await writeFile(filePath, JSON.stringify(dump, null, 2), { encoding: "utf-8", mode: FILE_MODE });
+  await chmod(filePath, FILE_MODE);
+}
+async function readTableDump(filename, dir) {
+  const filePath = resolveWithinDir(dir, filename);
   const content = await readFile(filePath, "utf-8");
   return JSON.parse(content);
 }
 async function writeMetadata(metadata, dir) {
-  await mkdir(dir, { recursive: true });
-  const filePath = join2(dir, METADATA_FILENAME);
-  await writeFile(filePath, JSON.stringify(metadata, null, 2), "utf-8");
+  await mkdir(dir, { recursive: true, mode: DIR_MODE });
+  const filePath = resolveWithinDir(dir, METADATA_FILENAME);
+  await writeFile(filePath, JSON.stringify(metadata, null, 2), {
+    encoding: "utf-8",
+    mode: FILE_MODE
+  });
+  await chmod(filePath, FILE_MODE);
 }
 async function readMetadata(dir) {
-  const filePath = join2(dir, METADATA_FILENAME);
+  const filePath = resolveWithinDir(dir, METADATA_FILENAME);
   const content = await readFile(filePath, "utf-8");
   return JSON.parse(content);
 }
 async function dumpExists(dir) {
-  return existsSync(join2(dir, METADATA_FILENAME));
+  return existsSync(resolveWithinDir(dir, METADATA_FILENAME));
 }
 async function getTableFiles(dir) {
   const files = await readdir(dir);
-  return files.filter((f) => f.endsWith(".json") && f !== METADATA_FILENAME).map((f) => f.replace(".json", ""));
+  const jsonFiles = files.filter((f) => f.endsWith(".json") && f !== METADATA_FILENAME);
+  const entries = [];
+  for (const file of jsonFiles) {
+    const dump = await readTableDump(file, dir);
+    entries.push({ file, table: dump.table });
+  }
+  return entries;
 }
 
 // src/commands/dump.ts
@@ -130,21 +182,27 @@ async function executeDump(provider, providerName, outputDir) {
 
 // src/config/profiles.ts
 import { existsSync as existsSync2 } from "fs";
-import { mkdir as mkdir2, readdir as readdir2, readFile as readFile2, rm, writeFile as writeFile2 } from "fs/promises";
-import { join as join3 } from "path";
+import { chmod as chmod2, mkdir as mkdir2, readdir as readdir2, readFile as readFile2, rm, writeFile as writeFile2 } from "fs/promises";
+import { join as join2 } from "path";
+var DIR_MODE2 = 448;
+var FILE_MODE2 = 384;
 function resolveDir(configDir) {
   if (configDir) return configDir;
-  return join3(CONFIG_BASE_DIR, "profiles");
+  return join2(CONFIG_BASE_DIR, "profiles");
 }
 async function saveProfile(profile, configDir) {
   const dir = resolveDir(configDir);
-  await mkdir2(dir, { recursive: true });
-  const filePath = join3(dir, `${profile.name}.json`);
-  await writeFile2(filePath, JSON.stringify(profile, null, 2), "utf-8");
+  await mkdir2(dir, { recursive: true, mode: DIR_MODE2 });
+  const filePath = join2(dir, `${profile.name}.json`);
+  await writeFile2(filePath, JSON.stringify(profile, null, 2), {
+    encoding: "utf-8",
+    mode: FILE_MODE2
+  });
+  await chmod2(filePath, FILE_MODE2);
 }
 async function loadProfile(name, configDir) {
   const dir = resolveDir(configDir);
-  const filePath = join3(dir, `${name}.json`);
+  const filePath = join2(dir, `${name}.json`);
   if (!existsSync2(filePath)) {
     throw new Error(`Profile "${name}" not found`);
   }
@@ -158,14 +216,14 @@ async function listProfiles(configDir) {
   const profiles = [];
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
-    const content = await readFile2(join3(dir, file), "utf-8");
+    const content = await readFile2(join2(dir, file), "utf-8");
     profiles.push(JSON.parse(content));
   }
   return profiles;
 }
 async function deleteProfile(name, configDir) {
   const dir = resolveDir(configDir);
-  const filePath = join3(dir, `${name}.json`);
+  const filePath = join2(dir, `${name}.json`);
   if (!existsSync2(filePath)) {
     throw new Error(`Profile "${name}" not found`);
   }
@@ -173,29 +231,33 @@ async function deleteProfile(name, configDir) {
 }
 async function profileExists(name, configDir) {
   const dir = resolveDir(configDir);
-  return existsSync2(join3(dir, `${name}.json`));
+  return existsSync2(join2(dir, `${name}.json`));
 }
 
 // src/ui/logger.ts
 import chalk from "chalk";
+var UNSAFE_CONTROL_CHARS = /[\x1b\x00-\x08\x0b\x0c\x0e-\x1f\x80-\x9f]/g;
+function sanitize(s) {
+  return s.replace(UNSAFE_CONTROL_CHARS, "");
+}
 function success(message) {
-  console.log(chalk.green(`\u2713 ${message}`));
+  console.log(chalk.green(`\u2713 ${sanitize(message)}`));
 }
 function warn(message) {
-  console.log(chalk.yellow(`\u26A0 ${message}`));
+  console.log(chalk.yellow(`\u26A0 ${sanitize(message)}`));
 }
 function error(message, hint) {
-  const [first, ...rest] = message.split("\n");
+  const [first, ...rest] = sanitize(message).split("\n");
   console.log(chalk.red(`\u2717 Error: ${first}`));
   if (rest.length > 0) {
     console.log(chalk.gray(rest.join("\n")));
   }
   if (hint) {
-    console.log(chalk.gray(`  Hint: ${hint}`));
+    console.log(chalk.gray(`  Hint: ${sanitize(hint)}`));
   }
 }
 function info(message) {
-  console.log(chalk.cyan(`\u2139 ${message}`));
+  console.log(chalk.cyan(`\u2139 ${sanitize(message)}`));
 }
 
 // src/ui/table.ts
@@ -203,14 +265,14 @@ import chalk2 from "chalk";
 import Table from "cli-table3";
 function printTable({ head, rows, totalRow }) {
   const table = new Table({
-    head: head.map((h) => chalk2.bold(h)),
+    head: head.map((h) => chalk2.bold(sanitize(h))),
     style: { head: [], border: [] }
   });
   for (const row of rows) {
-    table.push(row.map((cell) => String(cell)));
+    table.push(row.map((cell) => sanitize(String(cell))));
   }
   if (totalRow) {
-    table.push(totalRow.map((cell) => chalk2.bold(String(cell))));
+    table.push(totalRow.map((cell) => chalk2.bold(sanitize(String(cell)))));
   }
   console.log(table.toString());
 }
@@ -286,13 +348,13 @@ function chunk(array, size = BATCH_SIZE) {
 // src/commands/restore.ts
 async function executeRestore(provider, inputDir) {
   await readMetadata(inputDir);
-  const tableNames = await getTableFiles(inputDir);
+  const tableFiles = await getTableFiles(inputDir);
   const result = { tables: [], totalRows: 0, warnings: [], errors: [] };
   await provider.disableForeignKeys();
   try {
-    for (const tableName of tableNames) {
+    for (const { file, table: tableName } of tableFiles) {
       try {
-        const dump = await readTableDump(tableName, inputDir);
+        const dump = await readTableDump(file, inputDir);
         const currentTables = await provider.getTables();
         if (!currentTables.includes(tableName)) {
           result.warnings.push(
@@ -528,13 +590,13 @@ function handleError(err, context = {}) {
 
 // src/ui/header.ts
 import { existsSync as existsSync3, readFileSync } from "fs";
-import { dirname, join as join4 } from "path";
+import { dirname, join as join3 } from "path";
 import { fileURLToPath } from "url";
 import chalk3 from "chalk";
 function getVersion() {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 5; i++) {
-    const pkgPath = join4(dir, "package.json");
+    const pkgPath = join3(dir, "package.json");
     if (existsSync3(pkgPath)) {
       const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
       return pkg.version ?? "0.0.0";
@@ -558,22 +620,28 @@ function printHeader() {
 
 // src/utils/archive.ts
 import { execFile } from "child_process";
-import { mkdir as mkdir3, readdir as readdir3, rm as rm2 } from "fs/promises";
-import { join as join5 } from "path";
+import { chmod as chmod3, mkdir as mkdir3, readdir as readdir3, rm as rm2 } from "fs/promises";
+import { join as join4 } from "path";
 import { promisify } from "util";
 var execFileAsync = promisify(execFile);
+var ARCHIVE_DIR_MODE = 448;
+var ARCHIVE_FILE_MODE = 384;
+function isSafeArchiveEntry(filename) {
+  return !filename.startsWith("-") && !filename.includes("/") && !filename.includes("\\");
+}
 async function archiveDump(dumpDir, profileName) {
-  await mkdir3(ARCHIVE_DIR, { recursive: true });
+  await mkdir3(ARCHIVE_DIR, { recursive: true, mode: ARCHIVE_DIR_MODE });
   const now = /* @__PURE__ */ new Date();
   const date = now.toISOString().slice(0, 10).replace(/-/g, "");
   const time = now.toISOString().slice(11, 19).replace(/:/g, "");
   const archiveName = `${profileName}_${date}_${time}.tar.gz`;
-  const archivePath = join5(ARCHIVE_DIR, archiveName);
+  const archivePath = join4(ARCHIVE_DIR, archiveName);
   const files = await readdir3(dumpDir);
-  const jsonFiles = files.filter((f) => f.endsWith(".json"));
-  await execFileAsync("tar", ["-czf", archivePath, "-C", dumpDir, ...jsonFiles]);
+  const jsonFiles = files.filter((f) => f.endsWith(".json") && isSafeArchiveEntry(f));
+  await execFileAsync("tar", ["-czf", archivePath, "-C", dumpDir, "--", ...jsonFiles]);
+  await chmod3(archivePath, ARCHIVE_FILE_MODE);
   for (const file of jsonFiles) {
-    await rm2(join5(dumpDir, file));
+    await rm2(join4(dumpDir, file));
   }
   return archivePath;
 }
@@ -581,7 +649,7 @@ async function deleteDump(dumpDir) {
   const files = await readdir3(dumpDir);
   const jsonFiles = files.filter((f) => f.endsWith(".json"));
   for (const file of jsonFiles) {
-    await rm2(join5(dumpDir, file));
+    await rm2(join4(dumpDir, file));
   }
 }
 

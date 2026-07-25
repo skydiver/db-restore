@@ -1,0 +1,6 @@
+{
+  "table": "order items",
+  "primaryKeys": ["id"],
+  "columns": [{ "name": "id", "type": "int" }, { "name": "sku", "type": "string" }],
+  "rows": [{ "id": 1, "sku": "ABC-1" }]
+}
