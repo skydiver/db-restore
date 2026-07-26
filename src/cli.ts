@@ -11,7 +11,7 @@ import { setupCommand } from './commands/setup.js';
 import { loadProfile, profileExists } from './config/profiles.js';
 import { getDefaultDumpDir } from './constants.js';
 import { handleError } from './ui/errors.js';
-import { printHeader } from './ui/header.js';
+import { getVersion, printHeader } from './ui/header.js';
 import * as logger from './ui/logger.js';
 import { printTable } from './ui/table.js';
 import { archiveDump, deleteDump } from './utils/archive.js';
@@ -140,7 +140,7 @@ async function runRestore(name: string, opts: { in?: string; verbose: boolean })
 program
   .name('db-restore')
   .description('Database backup & restore for local development')
-  .version('1.2.2')
+  .version(getVersion())
   .argument('[name]', 'profile name')
   .argument('[action]', 'action to run: dump or restore')
   .option('--out <dir>', 'Dump output directory (default: ~/.config/db-restore/dumps/<name>)')

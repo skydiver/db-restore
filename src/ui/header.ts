@@ -3,7 +3,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import chalk from 'chalk';
 
-function getVersion(): string {
+/**
+ * Reads the version from the nearest package.json, walking up from this
+ * module. Both the header and the CLI's `--version` flag read it from here so
+ * the two can never drift apart.
+ */
+export function getVersion(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 5; i++) {
     const pkgPath = join(dir, 'package.json');
