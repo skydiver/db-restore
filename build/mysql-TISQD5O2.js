@@ -61,6 +61,18 @@ var MysqlProvider = class {
       type: r.data_type
     }));
   }
+  /** Mirrors `getColumns`' filter, so the two can never disagree. */
+  async getGeneratedColumns(table) {
+    const conn = this.getConnection();
+    const [rows] = await conn.query(
+      `SELECT column_name AS column_name FROM information_schema.columns
+       WHERE table_name = ? AND table_schema = DATABASE()
+         AND generation_expression IS NOT NULL AND generation_expression <> ''
+       ORDER BY ordinal_position`,
+      [table]
+    );
+    return rows.map((r) => r.column_name);
+  }
   async getPrimaryKeys(table) {
     const conn = this.getConnection();
     const [rows] = await conn.query(

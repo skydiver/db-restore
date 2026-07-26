@@ -37,6 +37,12 @@ export interface DatabaseProvider {
   disconnect(): Promise<void>;
   getTables(): Promise<string[]>;
   getColumns(table: string): Promise<Column[]>;
+  /**
+   * Names the generated columns `getColumns` filters out. Restoring cannot
+   * write them, but callers need to tell "the database computes this" apart
+   * from "this column no longer exists" when reporting schema drift.
+   */
+  getGeneratedColumns(table: string): Promise<string[]>;
   getPrimaryKeys(table: string): Promise<string[]>;
   getRows(table: string): Promise<Record<string, unknown>[]>;
   truncateTable(table: string): Promise<void>;

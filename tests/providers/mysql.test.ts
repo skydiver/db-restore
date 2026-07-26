@@ -127,6 +127,13 @@ describe.skipIf(!mysqlAvailable)('MysqlProvider', () => {
     expect(columns.map((c) => c.name)).toEqual(['id', 'quantity', 'unit_price', 'created_at']);
   });
 
+  it('names the generated columns that getColumns filters out', async () => {
+    expect(await provider.getGeneratedColumns('line_items')).toEqual(['total']);
+    // `created_at DEFAULT CURRENT_TIMESTAMP` reports as DEFAULT_GENERATED but
+    // is not a generated column, so it must not be reported here either.
+    expect(await provider.getGeneratedColumns('users')).toEqual([]);
+  });
+
   it('upserts a row into a table that has a generated column', async () => {
     const columns = await provider.getColumns('line_items');
 

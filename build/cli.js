@@ -418,9 +418,13 @@ async function executeRestore(provider, inputDir) {
         const currentColumns = await provider.getColumns(tableName);
         const currentColNames = new Set(currentColumns.map((c) => c.name));
         const dumpColNames = new Set(dump.columns.map((c) => c.name));
-        for (const col of dump.columns) {
-          if (!currentColNames.has(col.name)) {
-            result.warnings.push(`Skipping removed column "${col.name}" in table "${tableName}"`);
+        const missingFromSchema = dump.columns.filter((c) => !currentColNames.has(c.name));
+        if (missingFromSchema.length > 0) {
+          const generated = new Set(await provider.getGeneratedColumns(tableName));
+          for (const col of missingFromSchema) {
+            result.warnings.push(
+              generated.has(col.name) ? `Skipping generated column "${col.name}" in table "${tableName}" \u2014 recomputed by the database` : `Skipping removed column "${col.name}" in table "${tableName}"`
+            );
           }
         }
         const matchingColumns = [];
@@ -528,15 +532,15 @@ async function askOverwrite(name) {
 async function createProvider(provider) {
   switch (provider) {
     case "sqlite": {
-      const { SqliteProvider } = await import("./sqlite-MKFLZFA7.js");
+      const { SqliteProvider } = await import("./sqlite-54I7Z54Z.js");
       return new SqliteProvider();
     }
     case "postgres": {
-      const { PostgresProvider } = await import("./postgres-5X5AY3DL.js");
+      const { PostgresProvider } = await import("./postgres-SPCR74JR.js");
       return new PostgresProvider();
     }
     case "mysql": {
-      const { MysqlProvider } = await import("./mysql-UGRPCMY3.js");
+      const { MysqlProvider } = await import("./mysql-TISQD5O2.js");
       return new MysqlProvider();
     }
     default:

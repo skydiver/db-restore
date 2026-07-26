@@ -57,9 +57,18 @@ export async function executeRestore(
         const currentColNames = new Set(currentColumns.map((c) => c.name));
         const dumpColNames = new Set(dump.columns.map((c) => c.name));
 
-        for (const col of dump.columns) {
-          if (!currentColNames.has(col.name)) {
-            result.warnings.push(`Skipping removed column "${col.name}" in table "${tableName}"`);
+        const missingFromSchema = dump.columns.filter((c) => !currentColNames.has(c.name));
+        if (missingFromSchema.length > 0) {
+          // Only worth a round-trip once something is actually missing: a
+          // generated column is absent from getColumns for a benign reason
+          // (the database computes it), and must not be reported as removed.
+          const generated = new Set(await provider.getGeneratedColumns(tableName));
+          for (const col of missingFromSchema) {
+            result.warnings.push(
+              generated.has(col.name)
+                ? `Skipping generated column "${col.name}" in table "${tableName}" — recomputed by the database`
+                : `Skipping removed column "${col.name}" in table "${tableName}"`
+            );
           }
         }
 

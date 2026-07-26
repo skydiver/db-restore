@@ -44,6 +44,22 @@ export class SqliteProvider implements DatabaseProvider {
     return rows.map((r) => ({ name: r.name, type: r.type }));
   }
 
+  /**
+   * `table_info` omits generated columns entirely, so the extended
+   * `table_xinfo` pragma is needed to see them. Its `hidden` flag marks
+   * VIRTUAL generated columns as 2 and STORED ones as 3.
+   */
+  async getGeneratedColumns(table: string): Promise<string[]> {
+    const db = this.getDb();
+    const rows = db.pragma(`table_xinfo("${table.replace(/"/g, '""')}")`) as {
+      name: string;
+      hidden: number | bigint;
+    }[];
+    // `defaultSafeIntegers(true)` makes pragma integers read back as BigInt,
+    // so normalise before comparing.
+    return rows.filter((r) => Number(r.hidden) === 2 || Number(r.hidden) === 3).map((r) => r.name);
+  }
+
   async getPrimaryKeys(table: string): Promise<string[]> {
     const db = this.getDb();
     const rows = db.pragma(`table_info("${table.replace(/"/g, '""')}")`) as {

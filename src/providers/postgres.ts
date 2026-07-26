@@ -55,6 +55,17 @@ export class PostgresProvider implements DatabaseProvider {
     }));
   }
 
+  async getGeneratedColumns(table: string): Promise<string[]> {
+    const client = this.getClient();
+    const result = await client.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = $1 AND is_generated = 'ALWAYS'
+       ORDER BY ordinal_position`,
+      [table]
+    );
+    return (result.rows as { column_name: string }[]).map((r) => r.column_name);
+  }
+
   async getPrimaryKeys(table: string): Promise<string[]> {
     const client = this.getClient();
     const result = await client.query(

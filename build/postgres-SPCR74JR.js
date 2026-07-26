@@ -51,6 +51,16 @@ var PostgresProvider = class {
       type: r.data_type
     }));
   }
+  async getGeneratedColumns(table) {
+    const client = this.getClient();
+    const result = await client.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = $1 AND is_generated = 'ALWAYS'
+       ORDER BY ordinal_position`,
+      [table]
+    );
+    return result.rows.map((r) => r.column_name);
+  }
   async getPrimaryKeys(table) {
     const client = this.getClient();
     const result = await client.query(

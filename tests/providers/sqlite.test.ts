@@ -70,6 +70,28 @@ describe('SqliteProvider', () => {
       const columns = await provider.getColumns('line_items');
       expect(columns.map((c) => c.name)).toEqual(['id', 'quantity', 'unit_price']);
     });
+  });
+
+  describe('getGeneratedColumns', () => {
+    it('names the generated columns that getColumns filters out', async () => {
+      expect(await provider.getGeneratedColumns('line_items')).toEqual(['total']);
+    });
+
+    it('returns nothing for a table without generated columns', async () => {
+      expect(await provider.getGeneratedColumns('users')).toEqual([]);
+    });
+
+    it('handles a table name that is not a bare identifier', async () => {
+      const db = new Database(':memory:');
+      db.exec(
+        'CREATE TABLE "order items" (qty INTEGER, price REAL, total REAL GENERATED ALWAYS AS (qty * price) STORED)'
+      );
+      const p = new SqliteProvider();
+      p.connectWithDb(db);
+
+      expect(await p.getGeneratedColumns('order items')).toEqual(['total']);
+      db.close();
+    });
 
     it('upserts a row into a table that has a generated column', async () => {
       const columns = await provider.getColumns('line_items');

@@ -34,6 +34,16 @@ var SqliteProvider = class {
     const rows = db.pragma(`table_info("${table.replace(/"/g, '""')}")`);
     return rows.map((r) => ({ name: r.name, type: r.type }));
   }
+  /**
+   * `table_info` omits generated columns entirely, so the extended
+   * `table_xinfo` pragma is needed to see them. Its `hidden` flag marks
+   * VIRTUAL generated columns as 2 and STORED ones as 3.
+   */
+  async getGeneratedColumns(table) {
+    const db = this.getDb();
+    const rows = db.pragma(`table_xinfo("${table.replace(/"/g, '""')}")`);
+    return rows.filter((r) => Number(r.hidden) === 2 || Number(r.hidden) === 3).map((r) => r.name);
+  }
   async getPrimaryKeys(table) {
     const db = this.getDb();
     const rows = db.pragma(`table_info("${table.replace(/"/g, '""')}")`);

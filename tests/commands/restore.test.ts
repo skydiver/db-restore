@@ -266,6 +266,105 @@ describe('restore command', () => {
     targetDb.close();
   });
 
+  /**
+   * A dump taken before generated columns were excluded still carries those
+   * columns. Restoring it is harmless — the database recomputes the value —
+   * but the warning must say so, because "removed column" reads like silent
+   * data loss when nothing was lost.
+   */
+  describe('columns present in the dump but absent from the live schema', () => {
+    async function writeStaleDump(columns: string[], row: Record<string, unknown>) {
+      await writeFile(
+        join(tempDir, '_metadata.json'),
+        JSON.stringify({
+          provider: 'sqlite',
+          timestamp: '2026-07-25T20:14:33.703Z',
+          tables: ['line_items'],
+          version: 1,
+        })
+      );
+      await writeFile(
+        join(tempDir, 'line_items.json'),
+        JSON.stringify({
+          table: 'line_items',
+          primaryKeys: ['id'],
+          columns: columns.map((name) => ({ name, type: 'REAL' })),
+          rows: [row],
+        })
+      );
+    }
+
+    function targetWithGeneratedTotal() {
+      const db = new Database(':memory:');
+      db.exec(
+        `CREATE TABLE line_items (
+           id INTEGER PRIMARY KEY,
+           quantity INTEGER,
+           unit_price REAL,
+           total REAL GENERATED ALWAYS AS (quantity * unit_price) STORED
+         )`
+      );
+      const provider = new SqliteProvider();
+      provider.connectWithDb(db);
+      return { db, provider };
+    }
+
+    it('reports a generated column as generated, not as removed', async () => {
+      await writeStaleDump(['id', 'quantity', 'unit_price', 'total'], {
+        id: 1,
+        quantity: 3,
+        unit_price: 20,
+        total: 60,
+      });
+      const { db, provider } = targetWithGeneratedTotal();
+
+      const result = await executeRestore(provider, tempDir);
+
+      expect(result.errors).toHaveLength(0);
+      const warning = result.warnings.find((w) => w.includes('total'));
+      expect(warning).toBeDefined();
+      expect(warning).toContain('generated');
+      expect(warning).not.toContain('removed');
+      db.close();
+    });
+
+    it('still recomputes the generated value rather than losing it', async () => {
+      await writeStaleDump(['id', 'quantity', 'unit_price', 'total'], {
+        id: 1,
+        quantity: 3,
+        unit_price: 20,
+        total: 999,
+      });
+      const { db, provider } = targetWithGeneratedTotal();
+
+      await executeRestore(provider, tempDir);
+
+      // The database recomputes from the restored inputs; the dump's stale
+      // 999 must not survive.
+      const rows = (await provider.getRows('line_items')) as Record<string, unknown>[];
+      expect(rows[0]?.['total']).toBe(60);
+      db.close();
+    });
+
+    it('still reports a genuinely dropped column as removed', async () => {
+      await writeStaleDump(['id', 'quantity', 'unit_price', 'legacy_note'], {
+        id: 1,
+        quantity: 3,
+        unit_price: 20,
+        legacy_note: 'x',
+      });
+      const { db, provider } = targetWithGeneratedTotal();
+
+      const result = await executeRestore(provider, tempDir);
+
+      const warning = result.warnings.find((w) => w.includes('legacy_note'));
+      expect(warning).toBeDefined();
+      expect(warning).toContain('removed');
+      expect(warning).not.toContain('generated');
+      db.close();
+    });
+  });
+
   it('restores a table with a quoted/hostile name from a legacy dump fixture', async () => {
     const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/legacy-dump');
 
