@@ -58,9 +58,41 @@ describe('encodeValue', () => {
     });
   });
 
-  it('passes through arrays as-is', () => {
+  it('passes through arrays of plain scalars unchanged', () => {
     const arr = [1, 2, 3];
     expect(encodeValue(arr)).toEqual([1, 2, 3]);
+  });
+
+  it('encodes array elements rather than leaving them raw', () => {
+    const buf = Buffer.from('hi');
+    const date = new Date('2026-01-15T10:30:00.000Z');
+
+    expect(encodeValue([buf, date])).toEqual([
+      { __type: 'bytes', value: buf.toString('base64') },
+      { __type: 'datetime', value: '2026-01-15T10:30:00.000Z' },
+    ]);
+  });
+
+  it('keeps a BigInt element serializable', () => {
+    const encoded = encodeValue([BigInt('9007199254740993')]);
+
+    // The point of the wrapper: an unencoded BigInt makes JSON.stringify
+    // throw "Do not know how to serialize a BigInt" when the dump is written.
+    expect(() => JSON.stringify(encoded)).not.toThrow();
+    expect(encoded).toEqual([{ __type: 'bigint', value: '9007199254740993' }]);
+  });
+
+  it('encodes nested arrays recursively', () => {
+    expect(encodeValue([[BigInt('9007199254740993')]])).toEqual([
+      [{ __type: 'bigint', value: '9007199254740993' }],
+    ]);
+  });
+
+  it('leaves the payload of a json-typed column untouched', () => {
+    const row = { tags: [{ __type: 'not-a-wrapper' }, 1] };
+    const encoded = encodeRow(row, new Set(['tags']));
+
+    expect(encoded['tags']).toEqual({ __type: 'json', value: row.tags });
   });
 });
 

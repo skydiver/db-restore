@@ -365,6 +365,82 @@ describe('restore command', () => {
     });
   });
 
+  describe('failure isolation', () => {
+    async function writeMetadataFile(tables: string[]) {
+      await writeFile(
+        join(tempDir, '_metadata.json'),
+        JSON.stringify({
+          provider: 'sqlite',
+          timestamp: '2026-07-25T20:14:33.703Z',
+          tables,
+          version: 1,
+        })
+      );
+    }
+
+    function targetWithUsers() {
+      const db = new Database(':memory:');
+      db.exec('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)');
+      const provider = new SqliteProvider();
+      provider.connectWithDb(db);
+      return { db, provider };
+    }
+
+    it('restores the remaining tables when one dump file is corrupt', async () => {
+      await writeMetadataFile(['users', 'broken']);
+      await writeFile(
+        join(tempDir, 'users.json'),
+        JSON.stringify({
+          table: 'users',
+          primaryKeys: ['id'],
+          columns: [
+            { name: 'id', type: 'INTEGER' },
+            { name: 'name', type: 'TEXT' },
+          ],
+          rows: [{ id: 1, name: 'Alice' }],
+        })
+      );
+      await writeFile(join(tempDir, 'broken.json'), '{ this is not json');
+      const { db, provider } = targetWithUsers();
+
+      const result = await executeRestore(provider, tempDir);
+
+      // The corrupt file is reported against its own name and nothing else
+      // is lost — previously it threw before any table was restored.
+      expect(result.errors.some((e) => e.includes('broken.json'))).toBe(true);
+      expect(result.tables.map((t) => t.table)).toEqual(['users']);
+      expect(await provider.getRows('users')).toHaveLength(1);
+      db.close();
+    });
+
+    it('records a resetSequences failure instead of discarding the whole result', async () => {
+      await writeMetadataFile(['users']);
+      await writeFile(
+        join(tempDir, 'users.json'),
+        JSON.stringify({
+          table: 'users',
+          primaryKeys: ['id'],
+          columns: [
+            { name: 'id', type: 'INTEGER' },
+            { name: 'name', type: 'TEXT' },
+          ],
+          rows: [{ id: 1, name: 'Alice' }],
+        })
+      );
+      const { db, provider } = targetWithUsers();
+      provider.resetSequences = async () => {
+        throw new Error('permission denied for sequence users_id_seq');
+      };
+
+      const result = await executeRestore(provider, tempDir);
+
+      expect(result.tables).toHaveLength(1);
+      expect(result.totalRows).toBe(1);
+      expect(result.errors.some((e) => e.includes('permission denied'))).toBe(true);
+      db.close();
+    });
+  });
+
   it('restores a table with a quoted/hostile name from a legacy dump fixture', async () => {
     const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), '../fixtures/legacy-dump');
 

@@ -1,6 +1,16 @@
 import pg from 'pg';
 import { describeError } from '../utils/error.js';
+import { buildJsonErrorDetails } from './json-error.js';
 import type { Column, ConnectionConfig, DatabaseProvider } from './types.js';
+
+/**
+ * Quotes an identifier, doubling any embedded quote. Identifiers cannot be
+ * parameterized, and a legal name such as `a"b` would otherwise close the
+ * quoting early and produce invalid SQL.
+ */
+function quoteIdent(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
+}
 
 export class PostgresProvider implements DatabaseProvider {
   readonly name = 'postgres' as const;
@@ -73,14 +83,14 @@ export class PostgresProvider implements DatabaseProvider {
        FROM pg_index i
        JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
        WHERE i.indrelid = $1::regclass AND i.indisprimary`,
-      [`"${table}"`]
+      [quoteIdent(table)]
     );
     return (result.rows as { attname: string }[]).map((r) => r.attname);
   }
 
   async getRows(table: string): Promise<Record<string, unknown>[]> {
     const client = this.getClient();
-    const result = await client.query(`SELECT * FROM "${table}"`);
+    const result = await client.query(`SELECT * FROM ${quoteIdent(table)}`);
     return result.rows as Record<string, unknown>[];
   }
 
@@ -90,7 +100,7 @@ export class PostgresProvider implements DatabaseProvider {
   // triggers set up by disableForeignKeys() and only touches this table.
   async truncateTable(table: string): Promise<void> {
     const client = this.getClient();
-    await client.query(`DELETE FROM "${table}"`);
+    await client.query(`DELETE FROM ${quoteIdent(table)}`);
   }
 
   async upsertRows(
@@ -109,21 +119,20 @@ export class PostgresProvider implements DatabaseProvider {
 
     for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
       const row = rows[rowIndex]!;
-      const values = colNames.map((c) => {
-        const val = row[c] ?? null;
-        if (jsonCols.has(c) && val !== null) return JSON.stringify(val);
-        return val;
-      });
+      const rawValues = colNames.map((c) => row[c] ?? null);
+      const values = rawValues.map((val, i) =>
+        jsonCols.has(colNames[i]!) && val !== null ? JSON.stringify(val) : val
+      );
       const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
-      const colList = colNames.map((c) => `"${c}"`).join(', ');
+      const colList = colNames.map(quoteIdent).join(', ');
 
-      let sql = `INSERT INTO "${table}" (${colList}) VALUES (${placeholders})`;
+      let sql = `INSERT INTO ${quoteIdent(table)} (${colList}) VALUES (${placeholders})`;
 
       if (primaryKeys.length > 0) {
-        const conflictCols = primaryKeys.map((k) => `"${k}"`).join(', ');
+        const conflictCols = primaryKeys.map(quoteIdent).join(', ');
         const updateSet = colNames
           .filter((c) => !primaryKeys.includes(c))
-          .map((c) => `"${c}" = EXCLUDED."${c}"`)
+          .map((c) => `${quoteIdent(c)} = EXCLUDED.${quoteIdent(c)}`)
           .join(', ');
 
         if (updateSet) {
@@ -137,56 +146,32 @@ export class PostgresProvider implements DatabaseProvider {
         await client.query(sql, values);
       } catch (err) {
         const original = err instanceof Error ? err.message : String(err);
-        const details = this.buildErrorDetails(original, columns, values);
+        // rawValues, not values: the latter has already had every JSON
+        // column turned into a string, which would make the helper blame
+        // the first JSON column unconditionally.
+        const details = buildJsonErrorDetails(original, columns, rawValues);
         throw new Error(`Restoring table "${table}" (row ${rowIndex}): ${original}${details}`);
       }
     }
   }
 
-  private buildErrorDetails(message: string, columns: Column[], values: unknown[]): string {
-    if (!message.toLowerCase().includes('json')) return '';
-
-    for (let i = 0; i < columns.length; i++) {
-      const col = columns[i]!;
-      const val = values[i];
-      if (
-        (col.type === 'json' || col.type === 'jsonb') &&
-        val !== null &&
-        val !== undefined &&
-        (typeof val !== 'object' || Array.isArray(val))
-      ) {
-        const preview = this.formatValuePreview(val);
-        const valType = Array.isArray(val) ? 'array' : typeof val;
-        return `\n\n  Column: ${col.name} (${col.type})\n  Value:  ${preview} (${valType})`;
-      }
-    }
-    return '';
-  }
-
-  private formatValuePreview(val: unknown): string {
-    if (typeof val === 'string') {
-      return val.length > 50 ? `"${val.slice(0, 50)}..."` : `"${val}"`;
-    }
-    if (Array.isArray(val)) {
-      const str = JSON.stringify(val);
-      return str.length > 50 ? `${str.slice(0, 50)}...` : str;
-    }
-    return String(val);
-  }
-
   async resetSequences(table: string): Promise<void> {
     const client = this.getClient();
     const columns = await this.getColumns(table);
+    const quotedTable = quoteIdent(table);
 
     for (const col of columns) {
-      try {
-        await client.query(
-          `SELECT setval(pg_get_serial_sequence($1, $2), COALESCE(MAX("${col.name}"), 0) + 1, false) FROM "${table}"`,
-          [`"${table}"`, col.name]
-        );
-      } catch {
-        // Column doesn't have a sequence — skip silently
-      }
+      const lookup = await client.query('SELECT pg_get_serial_sequence($1, $2) AS sequence', [
+        quotedTable,
+        col.name,
+      ]);
+      const sequence = (lookup.rows[0] as { sequence: string | null } | undefined)?.sequence;
+      if (!sequence) continue;
+
+      await client.query(
+        `SELECT setval($1, COALESCE(MAX(${quoteIdent(col.name)}), 0) + 1, false) FROM ${quotedTable}`,
+        [sequence]
+      );
     }
   }
 

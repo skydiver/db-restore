@@ -227,6 +227,108 @@ describe.skipIf(!pgAvailable)('PostgresProvider', () => {
     });
   });
 
+  describe('identifiers containing characters that need escaping', () => {
+    // A double quote is legal in a quoted Postgres identifier; interpolating
+    // it without doubling closes the quoting early and yields invalid SQL.
+    const TABLE = 'we"ird orders';
+    const COLUMN = 'un"it';
+
+    beforeEach(async () => {
+      const setup = new pg.Client(TEST_CONFIG);
+      await setup.connect();
+      await setup.query(`CREATE TABLE "we""ird orders" (id SERIAL PRIMARY KEY, "un""it" TEXT)`);
+      await setup.end();
+    });
+
+    afterEach(async () => {
+      const cleanup = new pg.Client(TEST_CONFIG);
+      await cleanup.connect();
+      await cleanup.query(`DROP TABLE IF EXISTS "we""ird orders"`);
+      await cleanup.end();
+    });
+
+    it('reads, writes and resets a table whose name contains a quote', async () => {
+      expect(await provider.getPrimaryKeys(TABLE)).toEqual(['id']);
+      expect((await provider.getColumns(TABLE)).map((c) => c.name)).toEqual(['id', COLUMN]);
+
+      await provider.upsertRows(
+        TABLE,
+        [
+          { name: 'id', type: 'integer' },
+          { name: COLUMN, type: 'text' },
+        ],
+        ['id'],
+        [{ id: 1, [COLUMN]: 'kg' }]
+      );
+
+      const rows = (await provider.getRows(TABLE)) as Record<string, unknown>[];
+      expect(rows).toEqual([{ id: 1, [COLUMN]: 'kg' }]);
+
+      await provider.resetSequences(TABLE);
+      await provider.truncateTable(TABLE);
+      expect(await provider.getRows(TABLE)).toHaveLength(0);
+    });
+  });
+
+  describe('resetSequences', () => {
+    it('advances the sequence past restored ids so the next insert does not collide', async () => {
+      await provider.upsertRows(
+        'users',
+        [
+          { name: 'id', type: 'integer' },
+          { name: 'name', type: 'text' },
+        ],
+        ['id'],
+        [{ id: 500, name: 'Restored' }]
+      );
+
+      await provider.resetSequences('users');
+
+      const client = new pg.Client(TEST_CONFIG);
+      await client.connect();
+      // Would raise a duplicate-key error if the sequence still pointed at 3.
+      const inserted = await client.query("INSERT INTO users (name) VALUES ('After') RETURNING id");
+      await client.query('DELETE FROM users WHERE id >= 500');
+      await client.end();
+
+      expect(Number((inserted.rows[0] as { id: number }).id)).toBeGreaterThan(500);
+    });
+
+    it('surfaces a permission failure instead of swallowing it', async () => {
+      // The failure the old bare `catch {}` hid: the sequence is left behind
+      // the restored data, and the next insert fails with a duplicate key
+      // long after the restore reported success.
+      const admin = new pg.Client(TEST_CONFIG);
+      await admin.connect();
+      await admin.query(`DROP ROLE IF EXISTS db_restore_limited`);
+      await admin.query(`CREATE ROLE db_restore_limited LOGIN PASSWORD 'limited'`);
+      await admin.query(`GRANT CONNECT ON DATABASE ${TEST_DB} TO db_restore_limited`);
+      await admin.query('GRANT USAGE ON SCHEMA public TO db_restore_limited');
+      await admin.query('GRANT SELECT ON users TO db_restore_limited');
+      await admin.end();
+
+      const limited = new PostgresProvider();
+      await limited.connect({
+        ...TEST_CONFIG,
+        user: 'db_restore_limited',
+        password: 'limited',
+      });
+
+      // No USAGE on users_id_seq was granted, so setval is refused.
+      const failure = await limited.resetSequences('users').catch((e: unknown) => e as Error);
+      await limited.disconnect();
+
+      const cleanup = new pg.Client(TEST_CONFIG);
+      await cleanup.connect();
+      await cleanup.query('DROP OWNED BY db_restore_limited');
+      await cleanup.query('DROP ROLE db_restore_limited');
+      await cleanup.end();
+
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toMatch(/permission denied/i);
+    });
+  });
+
   it('upserts rows', async () => {
     const columns = [
       { name: 'id', type: 'integer' },

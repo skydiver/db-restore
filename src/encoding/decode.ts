@@ -8,6 +8,10 @@ function isTypeWrapper(value: unknown): value is TypeWrapper {
 }
 
 export function decodeValue(value: unknown): unknown {
+  // Mirrors encodeValue's array handling. A `json`-wrapped array is not
+  // affected: its payload is returned verbatim below, never walked.
+  if (Array.isArray(value)) return value.map(decodeValue);
+
   if (!isTypeWrapper(value)) return value;
 
   switch (value.__type) {

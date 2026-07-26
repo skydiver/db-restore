@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import {
+  describeError
+} from "./chunk-KY2R65TE.js";
 
 // src/cli.ts
 import { realpathSync } from "fs";
@@ -97,7 +100,10 @@ function encodeValue(value) {
     const buf = Buffer.isBuffer(value) ? value : Buffer.from(value);
     return { __type: "bytes", value: buf.toString("base64") };
   }
-  if (typeof value === "object" && !Array.isArray(value)) {
+  if (Array.isArray(value)) {
+    return value.map(encodeValue);
+  }
+  if (typeof value === "object") {
     return { __type: "json", value };
   }
   return value;
@@ -155,11 +161,25 @@ async function assertRegularFile(filePath) {
     throw new Error(`Refusing to read "${filePath}": not a regular file`);
   }
 }
+function assertTableDumpShape(value, filename) {
+  const dump = value;
+  const invalid = typeof dump !== "object" || dump === null || typeof dump.table !== "string" || !Array.isArray(dump.columns) || !Array.isArray(dump.rows);
+  if (invalid) {
+    throw new Error(`Malformed dump file "${filename}": missing table, columns or rows`);
+  }
+}
 async function readTableDump(filename, dir) {
   const filePath = resolveWithinDir(dir, filename);
   await assertRegularFile(filePath);
   const content = await readFile(filePath, "utf-8");
-  return JSON.parse(content);
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch (err) {
+    throw new Error(`Malformed dump file "${filename}": ${describeError(err)}`);
+  }
+  assertTableDumpShape(parsed, filename);
+  return parsed;
 }
 async function writeMetadata(metadata, dir) {
   await ensureDir(dir, DIR_MODE);
@@ -186,8 +206,7 @@ async function getTableFiles(dir) {
   for (const file of jsonFiles) {
     const stats = await lstat(resolveWithinDir(dir, file));
     if (!stats.isFile()) continue;
-    const dump = await readTableDump(file, dir);
-    entries.push({ file, table: dump.table });
+    entries.push(file);
   }
   return entries;
 }
@@ -354,6 +373,7 @@ function isTypeWrapper(value) {
   return typeof value === "object" && value !== null && "__type" in value && "value" in value;
 }
 function decodeValue(value) {
+  if (Array.isArray(value)) return value.map(decodeValue);
   if (!isTypeWrapper(value)) return value;
   switch (value.__type) {
     case "bytes":
@@ -403,12 +423,19 @@ async function executeRestore(provider, inputDir) {
   }
   const tableFiles = await getTableFiles(inputDir);
   const result = { tables: [], totalRows: 0, warnings: [], errors: [] };
-  await provider.disableForeignKeys();
   try {
-    for (const { file, table: tableName } of tableFiles) {
+    await provider.disableForeignKeys();
+    const currentTables = await provider.getTables();
+    for (const file of tableFiles) {
+      let dump;
       try {
-        const dump = await readTableDump(file, inputDir);
-        const currentTables = await provider.getTables();
+        dump = await readTableDump(file, inputDir);
+      } catch (err) {
+        result.errors.push(describeError(err));
+        continue;
+      }
+      const tableName = dump.table;
+      try {
         if (!currentTables.includes(tableName)) {
           result.warnings.push(
             `Table "${tableName}" from dump does not exist in database \u2014 skipped`
@@ -478,12 +505,15 @@ async function executeRestore(provider, inputDir) {
         }
         result.totalRows += decodedRows.length;
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        result.errors.push(message);
+        result.errors.push(describeError(err));
       }
     }
     for (const entry of result.tables) {
-      await provider.resetSequences(entry.table);
+      try {
+        await provider.resetSequences(entry.table);
+      } catch (err) {
+        result.errors.push(`Resetting sequences for "${entry.table}": ${describeError(err)}`);
+      }
     }
   } finally {
     await provider.enableForeignKeys();
@@ -536,11 +566,11 @@ async function createProvider(provider) {
       return new SqliteProvider();
     }
     case "postgres": {
-      const { PostgresProvider } = await import("./postgres-SPCR74JR.js");
+      const { PostgresProvider } = await import("./postgres-S4WAFD2G.js");
       return new PostgresProvider();
     }
     case "mysql": {
-      const { MysqlProvider } = await import("./mysql-TISQD5O2.js");
+      const { MysqlProvider } = await import("./mysql-KGTQCD33.js");
       return new MysqlProvider();
     }
     default:

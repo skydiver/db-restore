@@ -1,7 +1,8 @@
 import { DUMP_FORMAT_VERSION } from '../constants.js';
 import { decodeRow } from '../encoding/decode.js';
-import type { Column, DatabaseProvider } from '../providers/types.js';
+import type { Column, DatabaseProvider, TableDump } from '../providers/types.js';
 import { chunk } from '../utils/batch.js';
+import { describeError } from '../utils/error.js';
 import { getTableFiles, readMetadata, readTableDump } from '../utils/files.js';
 
 export interface RestoreResult {
@@ -36,15 +37,31 @@ export async function executeRestore(
 
   const result: RestoreResult = { tables: [], totalRows: 0, warnings: [], errors: [] };
 
-  await provider.disableForeignKeys();
-
+  // Inside the try, so the finally below is guaranteed to re-enable foreign
+  // keys once they have been disabled.
   try {
-    for (const { file, table: tableName } of tableFiles) {
-      try {
-        const dump = await readTableDump(file, inputDir);
+    await provider.disableForeignKeys();
 
-        // Check if table exists in current DB
-        const currentTables = await provider.getTables();
+    // The table list is identical for every iteration — querying it inside
+    // the loop costs one information_schema round-trip per table.
+    const currentTables = await provider.getTables();
+
+    for (const file of tableFiles) {
+      // Read before the per-table try so an unreadable file is reported
+      // against its filename: the table name lives inside the file, and is
+      // therefore unknown until the read succeeds. One corrupt file must
+      // not stop the remaining tables from being restored.
+      let dump: TableDump;
+      try {
+        dump = await readTableDump(file, inputDir);
+      } catch (err) {
+        result.errors.push(describeError(err));
+        continue;
+      }
+
+      const tableName = dump.table;
+
+      try {
         if (!currentTables.includes(tableName)) {
           result.warnings.push(
             `Table "${tableName}" from dump does not exist in database — skipped`
@@ -137,14 +154,19 @@ export async function executeRestore(
 
         result.totalRows += decodedRows.length;
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        result.errors.push(message);
+        result.errors.push(describeError(err));
       }
     }
 
-    // Reset sequences for all restored tables
+    // Reset sequences for all restored tables. A failure here is recorded
+    // like any other per-table error: letting it propagate would throw away
+    // the summary and the error list for a run that mostly succeeded.
     for (const entry of result.tables) {
-      await provider.resetSequences(entry.table);
+      try {
+        await provider.resetSequences(entry.table);
+      } catch (err) {
+        result.errors.push(`Resetting sequences for "${entry.table}": ${describeError(err)}`);
+      }
     }
   } finally {
     await provider.enableForeignKeys();

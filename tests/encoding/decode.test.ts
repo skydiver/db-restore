@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { decodeRow, decodeValue } from '../../src/encoding/decode.js';
+import { encodeValue } from '../../src/encoding/encode.js';
 
 describe('decodeValue', () => {
   it('passes through native JSON types', () => {
@@ -37,6 +38,25 @@ describe('decodeValue', () => {
   it('decodes decimal wrapper to string', () => {
     const encoded = { __type: 'decimal', value: '99.95' };
     expect(decodeValue(encoded)).toBe('99.95');
+  });
+});
+
+describe('array round-trip', () => {
+  it('decodes array elements, mirroring encodeValue', () => {
+    const buf = Buffer.from('hi');
+    const original = [buf, new Date('2026-01-15T10:30:00.000Z'), BigInt('9007199254740993')];
+
+    const decoded = decodeValue(JSON.parse(JSON.stringify(encodeValue(original)))) as unknown[];
+
+    expect(decoded[0]).toEqual(buf);
+    expect(decoded[1]).toBeInstanceOf(Date);
+    expect(decoded[2]).toBe(BigInt('9007199254740993'));
+  });
+
+  it('does not walk into a json wrapper payload', () => {
+    const payload = [{ __type: 'bytes', value: 'not really encoded' }];
+
+    expect(decodeValue({ __type: 'json', value: payload })).toEqual(payload);
   });
 });
 

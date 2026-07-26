@@ -30,7 +30,14 @@ export function encodeValue(value: unknown): unknown {
     return { __type: 'bytes', value: buf.toString('base64') } satisfies TypeWrapper;
   }
 
-  if (typeof value === 'object' && !Array.isArray(value)) {
+  // Array elements get the same treatment as scalars. Without this, an
+  // array column (Postgres `bytea[]`, `timestamptz[]`) loses its element
+  // types, and a BigInt element makes JSON.stringify throw outright.
+  if (Array.isArray(value)) {
+    return value.map(encodeValue);
+  }
+
+  if (typeof value === 'object') {
     return { __type: 'json', value } satisfies TypeWrapper;
   }
 

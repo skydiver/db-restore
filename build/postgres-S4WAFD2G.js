@@ -4,6 +4,42 @@ import {
 
 // src/providers/postgres.ts
 import pg from "pg";
+
+// src/providers/json-error.ts
+var MAX_PREVIEW_LENGTH = 50;
+function formatValuePreview(val) {
+  if (typeof val === "string") {
+    return val.length > MAX_PREVIEW_LENGTH ? `"${val.slice(0, MAX_PREVIEW_LENGTH)}..."` : `"${val}"`;
+  }
+  if (Array.isArray(val)) {
+    const str = JSON.stringify(val);
+    return str.length > MAX_PREVIEW_LENGTH ? `${str.slice(0, MAX_PREVIEW_LENGTH)}...` : str;
+  }
+  return String(val);
+}
+function buildJsonErrorDetails(message, columns, values) {
+  if (!message.toLowerCase().includes("json")) return "";
+  for (let i = 0; i < columns.length; i++) {
+    const col = columns[i];
+    const val = values[i];
+    const isJsonColumn = col.type === "json" || col.type === "jsonb";
+    const looksLikeJson = typeof val === "object" && !Array.isArray(val);
+    if (isJsonColumn && val !== null && val !== void 0 && !looksLikeJson) {
+      const preview = formatValuePreview(val);
+      const valType = Array.isArray(val) ? "array" : typeof val;
+      return `
+
+  Column: ${col.name} (${col.type})
+  Value:  ${preview} (${valType})`;
+    }
+  }
+  return "";
+}
+
+// src/providers/postgres.ts
+function quoteIdent(name) {
+  return `"${name.replace(/"/g, '""')}"`;
+}
 var PostgresProvider = class {
   name = "postgres";
   client = null;
@@ -68,13 +104,13 @@ var PostgresProvider = class {
        FROM pg_index i
        JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
        WHERE i.indrelid = $1::regclass AND i.indisprimary`,
-      [`"${table}"`]
+      [quoteIdent(table)]
     );
     return result.rows.map((r) => r.attname);
   }
   async getRows(table) {
     const client = this.getClient();
-    const result = await client.query(`SELECT * FROM "${table}"`);
+    const result = await client.query(`SELECT * FROM ${quoteIdent(table)}`);
     return result.rows;
   }
   // DELETE FROM, not TRUNCATE ... CASCADE: TRUNCATE CASCADE silently empties
@@ -83,7 +119,7 @@ var PostgresProvider = class {
   // triggers set up by disableForeignKeys() and only touches this table.
   async truncateTable(table) {
     const client = this.getClient();
-    await client.query(`DELETE FROM "${table}"`);
+    await client.query(`DELETE FROM ${quoteIdent(table)}`);
   }
   async upsertRows(table, columns, primaryKeys, rows) {
     const client = this.getClient();
@@ -94,17 +130,16 @@ var PostgresProvider = class {
     );
     for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
       const row = rows[rowIndex];
-      const values = colNames.map((c) => {
-        const val = row[c] ?? null;
-        if (jsonCols.has(c) && val !== null) return JSON.stringify(val);
-        return val;
-      });
+      const rawValues = colNames.map((c) => row[c] ?? null);
+      const values = rawValues.map(
+        (val, i) => jsonCols.has(colNames[i]) && val !== null ? JSON.stringify(val) : val
+      );
       const placeholders = values.map((_, i) => `$${i + 1}`).join(", ");
-      const colList = colNames.map((c) => `"${c}"`).join(", ");
-      let sql = `INSERT INTO "${table}" (${colList}) VALUES (${placeholders})`;
+      const colList = colNames.map(quoteIdent).join(", ");
+      let sql = `INSERT INTO ${quoteIdent(table)} (${colList}) VALUES (${placeholders})`;
       if (primaryKeys.length > 0) {
-        const conflictCols = primaryKeys.map((k) => `"${k}"`).join(", ");
-        const updateSet = colNames.filter((c) => !primaryKeys.includes(c)).map((c) => `"${c}" = EXCLUDED."${c}"`).join(", ");
+        const conflictCols = primaryKeys.map(quoteIdent).join(", ");
+        const updateSet = colNames.filter((c) => !primaryKeys.includes(c)).map((c) => `${quoteIdent(c)} = EXCLUDED.${quoteIdent(c)}`).join(", ");
         if (updateSet) {
           sql += ` ON CONFLICT (${conflictCols}) DO UPDATE SET ${updateSet}`;
         } else {
@@ -115,48 +150,26 @@ var PostgresProvider = class {
         await client.query(sql, values);
       } catch (err) {
         const original = err instanceof Error ? err.message : String(err);
-        const details = this.buildErrorDetails(original, columns, values);
+        const details = buildJsonErrorDetails(original, columns, rawValues);
         throw new Error(`Restoring table "${table}" (row ${rowIndex}): ${original}${details}`);
       }
     }
   }
-  buildErrorDetails(message, columns, values) {
-    if (!message.toLowerCase().includes("json")) return "";
-    for (let i = 0; i < columns.length; i++) {
-      const col = columns[i];
-      const val = values[i];
-      if ((col.type === "json" || col.type === "jsonb") && val !== null && val !== void 0 && (typeof val !== "object" || Array.isArray(val))) {
-        const preview = this.formatValuePreview(val);
-        const valType = Array.isArray(val) ? "array" : typeof val;
-        return `
-
-  Column: ${col.name} (${col.type})
-  Value:  ${preview} (${valType})`;
-      }
-    }
-    return "";
-  }
-  formatValuePreview(val) {
-    if (typeof val === "string") {
-      return val.length > 50 ? `"${val.slice(0, 50)}..."` : `"${val}"`;
-    }
-    if (Array.isArray(val)) {
-      const str = JSON.stringify(val);
-      return str.length > 50 ? `${str.slice(0, 50)}...` : str;
-    }
-    return String(val);
-  }
   async resetSequences(table) {
     const client = this.getClient();
     const columns = await this.getColumns(table);
+    const quotedTable = quoteIdent(table);
     for (const col of columns) {
-      try {
-        await client.query(
-          `SELECT setval(pg_get_serial_sequence($1, $2), COALESCE(MAX("${col.name}"), 0) + 1, false) FROM "${table}"`,
-          [`"${table}"`, col.name]
-        );
-      } catch {
-      }
+      const lookup = await client.query("SELECT pg_get_serial_sequence($1, $2) AS sequence", [
+        quotedTable,
+        col.name
+      ]);
+      const sequence = lookup.rows[0]?.sequence;
+      if (!sequence) continue;
+      await client.query(
+        `SELECT setval($1, COALESCE(MAX(${quoteIdent(col.name)}), 0) + 1, false) FROM ${quotedTable}`,
+        [sequence]
+      );
     }
   }
   async disableForeignKeys() {

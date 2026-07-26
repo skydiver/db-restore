@@ -256,6 +256,89 @@ describe.skipIf(!mysqlAvailable)('MysqlProvider', () => {
     });
   });
 
+  describe('a join table whose columns are all part of the primary key', () => {
+    beforeEach(async () => {
+      const setup = await createConnection(TEST_CONFIG);
+      await setup.query('DROP TABLE IF EXISTS tag_links');
+      await setup.query(
+        'CREATE TABLE tag_links (post_id INT NOT NULL, tag_id INT NOT NULL, PRIMARY KEY (post_id, tag_id))'
+      );
+      await setup.query('INSERT INTO tag_links VALUES (1, 10)');
+      await setup.end();
+    });
+
+    afterEach(async () => {
+      const cleanup = await createConnection(TEST_CONFIG);
+      await cleanup.query('DROP TABLE IF EXISTS tag_links');
+      await cleanup.end();
+    });
+
+    it('upserts an already-present row instead of failing on the duplicate key', async () => {
+      const columns = await provider.getColumns('tag_links');
+      const pks = await provider.getPrimaryKeys('tag_links');
+
+      // There is nothing to update — every column is a key — so without an
+      // explicit no-op ON DUPLICATE KEY UPDATE clause this insert fails
+      // outright on the row that already exists.
+      await provider.upsertRows('tag_links', columns, pks, [
+        { post_id: 1, tag_id: 10 },
+        { post_id: 2, tag_id: 20 },
+      ]);
+
+      const rows = (await provider.getRows('tag_links')) as Record<string, unknown>[];
+      expect(rows).toHaveLength(2);
+    });
+
+    it('still surfaces unrelated insert errors rather than downgrading them', async () => {
+      const columns = await provider.getColumns('tag_links');
+      const pks = await provider.getPrimaryKeys('tag_links');
+
+      // INSERT IGNORE would turn this NOT NULL violation into a warning and
+      // silently write a zero — the failure has to stay loud.
+      await expect(
+        provider.upsertRows('tag_links', columns, pks, [{ post_id: null, tag_id: 30 }])
+      ).rejects.toThrow(/tag_links/);
+    });
+  });
+
+  describe('identifiers containing characters that need escaping', () => {
+    const TABLE = 'we`ird orders';
+    const COLUMN = 'un`it';
+
+    beforeEach(async () => {
+      const setup = await createConnection(TEST_CONFIG);
+      await setup.query('DROP TABLE IF EXISTS `we``ird orders`');
+      await setup.query('CREATE TABLE `we``ird orders` (id INT PRIMARY KEY, `un``it` VARCHAR(50))');
+      await setup.end();
+    });
+
+    afterEach(async () => {
+      const cleanup = await createConnection(TEST_CONFIG);
+      await cleanup.query('DROP TABLE IF EXISTS `we``ird orders`');
+      await cleanup.end();
+    });
+
+    it('reads and writes a table whose name contains a backtick', async () => {
+      expect(await provider.getPrimaryKeys(TABLE)).toEqual(['id']);
+      expect((await provider.getColumns(TABLE)).map((c) => c.name)).toEqual(['id', COLUMN]);
+
+      await provider.upsertRows(
+        TABLE,
+        [
+          { name: 'id', type: 'int' },
+          { name: COLUMN, type: 'varchar' },
+        ],
+        ['id'],
+        [{ id: 1, [COLUMN]: 'kg' }]
+      );
+
+      expect(await provider.getRows(TABLE)).toEqual([{ id: 1, [COLUMN]: 'kg' }]);
+
+      await provider.truncateTable(TABLE);
+      expect(await provider.getRows(TABLE)).toHaveLength(0);
+    });
+  });
+
   describe('truncateTable', () => {
     it('uses DELETE semantics, not TRUNCATE — auto_increment is not reset', async () => {
       const setup = await createConnection(TEST_CONFIG);

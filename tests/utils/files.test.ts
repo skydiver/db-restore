@@ -61,15 +61,17 @@ describe('dump file I/O', () => {
     expect(await dumpExists(tempDir)).toBe(true);
   });
 
-  it('lists table dumps by reading the table field from file content, not the filename', async () => {
+  it('lists dump filenames, leaving the table identifier to be read from the file', async () => {
     await writeTableDump(tableDump, tempDir);
     await writeMetadata(metadata, tempDir);
 
     const entries = await getTableFiles(tempDir);
 
     expect(entries).toHaveLength(1);
-    expect(entries[0]?.table).toBe('users');
-    expect(entries[0]?.file.endsWith('.json')).toBe(true);
+    expect(entries[0]?.endsWith('.json')).toBe(true);
+
+    const loaded = await readTableDump(entries[0] as string, tempDir);
+    expect(loaded.table).toBe('users');
   });
 
   it('excludes the metadata file from getTableFiles', async () => {
@@ -78,7 +80,7 @@ describe('dump file I/O', () => {
 
     const entries = await getTableFiles(tempDir);
 
-    expect(entries.some((e) => e.file.includes('_metadata'))).toBe(false);
+    expect(entries.some((e) => e.includes('_metadata'))).toBe(false);
   });
 
   it.each(['../../evil', '-rf', 'a/b', '.', '..', 'wéird'])(
@@ -89,9 +91,8 @@ describe('dump file I/O', () => {
 
       const entries = await getTableFiles(tempDir);
       expect(entries).toHaveLength(1);
-      expect(entries[0]?.table).toBe(hostileName);
 
-      const loaded = await readTableDump(entries[0]?.file as string, tempDir);
+      const loaded = await readTableDump(entries[0] as string, tempDir);
       expect(loaded.table).toBe(hostileName);
     }
   );
@@ -100,14 +101,46 @@ describe('dump file I/O', () => {
     await expect(readTableDump('../outside.json', tempDir)).rejects.toThrow();
   });
 
+  it('names the file when its contents are not valid JSON', async () => {
+    await writeFile(join(tempDir, 'broken.json'), '{ not json');
+
+    await expect(readTableDump('broken.json', tempDir)).rejects.toThrow(
+      /Malformed dump file "broken.json"/
+    );
+  });
+
+  it.each([
+    ['a missing table field', { columns: [], rows: [] }],
+    ['a missing rows array', { table: 'users', columns: [] }],
+    ['rows that are not an array', { table: 'users', columns: [], rows: {} }],
+  ])('rejects a dump with %s instead of returning it', async (_label, content) => {
+    await writeFile(join(tempDir, 'shape.json'), JSON.stringify(content));
+
+    await expect(readTableDump('shape.json', tempDir)).rejects.toThrow(
+      /Malformed dump file "shape.json"/
+    );
+  });
+
+  it('lists a corrupt file rather than failing the whole listing', async () => {
+    await writeTableDump(tableDump, tempDir);
+    await writeFile(join(tempDir, 'broken.json'), '{ not json');
+
+    // getTableFiles no longer parses contents, so the caller decides how to
+    // handle each unreadable file individually.
+    const entries = await getTableFiles(tempDir);
+
+    expect(entries).toHaveLength(2);
+    expect(entries).toContain('broken.json');
+  });
+
   it('restores an old-style dump whose filename is the raw, unencoded table name', async () => {
     const fixtureDir = join(import.meta.dirname, '..', 'fixtures', 'legacy-dump');
     const entries = await getTableFiles(fixtureDir);
 
     expect(entries).toHaveLength(1);
-    expect(entries[0]?.table).toBe('order items');
 
-    const loaded = await readTableDump(entries[0]?.file as string, fixtureDir);
+    const loaded = await readTableDump(entries[0] as string, fixtureDir);
+    expect(loaded.table).toBe('order items');
     expect(loaded.rows).toEqual([{ id: 1, sku: 'ABC-1' }]);
   });
 });
@@ -152,7 +185,7 @@ describe('symlinked dump entries', () => {
 
       const entries = await getTableFiles(dumpDir);
 
-      expect(entries.map((e) => e.table)).toEqual(['orders']);
+      expect(entries).toEqual(['orders.json']);
     }
   );
 });

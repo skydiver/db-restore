@@ -4,6 +4,9 @@ import {
 
 // src/providers/mysql.ts
 import { createConnection } from "mysql2/promise";
+function quoteIdent(name) {
+  return `\`${name.replace(/`/g, "``")}\``;
+}
 var MysqlProvider = class {
   name = "mysql";
   connection = null;
@@ -83,17 +86,18 @@ var MysqlProvider = class {
   }
   async getRows(table) {
     const conn = this.getConnection();
-    const [rows] = await conn.query(`SELECT * FROM \`${table}\``);
+    const [rows] = await conn.query(`SELECT * FROM ${quoteIdent(table)}`);
     return rows;
   }
   async truncateTable(table) {
     const conn = this.getConnection();
-    await conn.query(`DELETE FROM \`${table}\``);
+    await conn.query(`DELETE FROM ${quoteIdent(table)}`);
   }
   async upsertRows(table, columns, primaryKeys, rows) {
     const conn = this.getConnection();
     if (rows.length === 0) return;
     const colNames = columns.map((c) => c.name);
+    const [firstColumn] = colNames;
     const jsonCols = new Set(columns.filter((c) => c.type === "json").map((c) => c.name));
     for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
       const row = rows[rowIndex];
@@ -103,12 +107,15 @@ var MysqlProvider = class {
         return val;
       });
       const placeholders = values.map(() => "?").join(", ");
-      const colList = colNames.map((c) => `\`${c}\``).join(", ");
-      let sql = `INSERT INTO \`${table}\` (${colList}) VALUES (${placeholders})`;
+      const colList = colNames.map(quoteIdent).join(", ");
+      let sql = `INSERT INTO ${quoteIdent(table)} (${colList}) VALUES (${placeholders})`;
       if (primaryKeys.length > 0) {
-        const updateSet = colNames.filter((c) => !primaryKeys.includes(c)).map((c) => `\`${c}\` = VALUES(\`${c}\`)`).join(", ");
+        const updateSet = colNames.filter((c) => !primaryKeys.includes(c)).map((c) => `${quoteIdent(c)} = VALUES(${quoteIdent(c)})`).join(", ");
         if (updateSet) {
           sql += ` ON DUPLICATE KEY UPDATE ${updateSet}`;
+        } else if (firstColumn) {
+          const key = quoteIdent(firstColumn);
+          sql += ` ON DUPLICATE KEY UPDATE ${key} = ${key}`;
         }
       }
       try {

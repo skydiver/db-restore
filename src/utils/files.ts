@@ -4,15 +4,11 @@ import { resolve, sep } from 'node:path';
 import { METADATA_FILENAME } from '../constants.js';
 import type { DumpMetadata, TableDump } from '../providers/types.js';
 import { ensureDir } from './dir-mode.js';
+import { describeError } from './error.js';
 import { toSafeFilename } from './table-name.js';
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
-
-export interface TableFileEntry {
-  file: string;
-  table: string;
-}
 
 function resolveWithinDir(dir: string, filename: string): string {
   const resolvedDir = resolve(dir);
@@ -45,11 +41,36 @@ async function assertRegularFile(filePath: string): Promise<void> {
   }
 }
 
+/**
+ * Checks the fields the restore loop dereferences. A hand-edited or
+ * truncated dump would otherwise surface as `undefined` deep inside that
+ * loop rather than as a clear statement about which file is unusable.
+ */
+function assertTableDumpShape(value: unknown, filename: string): asserts value is TableDump {
+  const dump = value as Partial<TableDump> | null;
+  const invalid =
+    typeof dump !== 'object' ||
+    dump === null ||
+    typeof dump.table !== 'string' ||
+    !Array.isArray(dump.columns) ||
+    !Array.isArray(dump.rows);
+  if (invalid) {
+    throw new Error(`Malformed dump file "${filename}": missing table, columns or rows`);
+  }
+}
+
 export async function readTableDump(filename: string, dir: string): Promise<TableDump> {
   const filePath = resolveWithinDir(dir, filename);
   await assertRegularFile(filePath);
   const content = await readFile(filePath, 'utf-8');
-  return JSON.parse(content) as TableDump;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch (err) {
+    throw new Error(`Malformed dump file "${filename}": ${describeError(err)}`);
+  }
+  assertTableDumpShape(parsed, filename);
+  return parsed;
 }
 
 export async function writeMetadata(metadata: DumpMetadata, dir: string): Promise<void> {
@@ -74,16 +95,19 @@ export async function dumpExists(dir: string): Promise<boolean> {
 }
 
 /**
- * Lists the table dumps in `dir`. The real table identifier is read from
- * each file's `table` field rather than derived from the filename: dumps
- * written before percent-encoding was introduced kept the raw table name
- * as the filename, and old and new dumps must both restore correctly.
+ * Lists the dump filenames in `dir` without reading their contents. The
+ * table identifier deliberately stays out of this listing: it lives in each
+ * file's `table` field (dumps written before percent-encoding kept the raw
+ * table name as the filename, so the filename cannot be trusted to be it),
+ * and reading it here would mean parsing every file twice and letting one
+ * unparseable file abort the whole restore. Callers read each dump when
+ * they are ready to handle its failure individually.
  */
-export async function getTableFiles(dir: string): Promise<TableFileEntry[]> {
+export async function getTableFiles(dir: string): Promise<string[]> {
   const files = await readdir(dir);
   const jsonFiles = files.filter((f) => f.endsWith('.json') && f !== METADATA_FILENAME);
 
-  const entries: TableFileEntry[] = [];
+  const entries: string[] = [];
   for (const file of jsonFiles) {
     // Symlinks and other non-regular entries are excluded from the listing
     // rather than aborting it — one hostile entry shouldn't make an
@@ -91,8 +115,7 @@ export async function getTableFiles(dir: string): Promise<TableFileEntry[]> {
     const stats = await lstat(resolveWithinDir(dir, file));
     if (!stats.isFile()) continue;
 
-    const dump = await readTableDump(file, dir);
-    entries.push({ file, table: dump.table });
+    entries.push(file);
   }
   return entries;
 }

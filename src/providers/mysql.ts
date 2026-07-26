@@ -2,6 +2,15 @@ import { type Connection, createConnection } from 'mysql2/promise';
 import { describeError } from '../utils/error.js';
 import type { Column, ConnectionConfig, DatabaseProvider } from './types.js';
 
+/**
+ * Quotes an identifier, doubling any embedded backtick. Identifiers cannot
+ * be parameterized, and a legal name such as `` a`b `` would otherwise close
+ * the quoting early and produce invalid SQL.
+ */
+function quoteIdent(name: string): string {
+  return `\`${name.replace(/`/g, '``')}\``;
+}
+
 export class MysqlProvider implements DatabaseProvider {
   readonly name = 'mysql' as const;
   private connection: Connection | null = null;
@@ -89,7 +98,7 @@ export class MysqlProvider implements DatabaseProvider {
 
   async getRows(table: string): Promise<Record<string, unknown>[]> {
     const conn = this.getConnection();
-    const [rows] = await conn.query(`SELECT * FROM \`${table}\``);
+    const [rows] = await conn.query(`SELECT * FROM ${quoteIdent(table)}`);
     return rows as Record<string, unknown>[];
   }
 
@@ -99,7 +108,7 @@ export class MysqlProvider implements DatabaseProvider {
     // which would silently break any surrounding transaction. DELETE FROM
     // also respects disabled FK checks, unlike TRUNCATE ... CASCADE-style
     // behavior on other engines.
-    await conn.query(`DELETE FROM \`${table}\``);
+    await conn.query(`DELETE FROM ${quoteIdent(table)}`);
   }
 
   async upsertRows(
@@ -112,6 +121,7 @@ export class MysqlProvider implements DatabaseProvider {
     if (rows.length === 0) return;
 
     const colNames = columns.map((c) => c.name);
+    const [firstColumn] = colNames;
     const jsonCols = new Set(columns.filter((c) => c.type === 'json').map((c) => c.name));
 
     for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
@@ -122,18 +132,26 @@ export class MysqlProvider implements DatabaseProvider {
         return val;
       });
       const placeholders = values.map(() => '?').join(', ');
-      const colList = colNames.map((c) => `\`${c}\``).join(', ');
+      const colList = colNames.map(quoteIdent).join(', ');
 
-      let sql = `INSERT INTO \`${table}\` (${colList}) VALUES (${placeholders})`;
+      let sql = `INSERT INTO ${quoteIdent(table)} (${colList}) VALUES (${placeholders})`;
 
       if (primaryKeys.length > 0) {
         const updateSet = colNames
           .filter((c) => !primaryKeys.includes(c))
-          .map((c) => `\`${c}\` = VALUES(\`${c}\`)`)
+          .map((c) => `${quoteIdent(c)} = VALUES(${quoteIdent(c)})`)
           .join(', ');
 
         if (updateSet) {
           sql += ` ON DUPLICATE KEY UPDATE ${updateSet}`;
+        } else if (firstColumn) {
+          // Every column is part of the primary key, so there is nothing to
+          // update — but the clause still has to be there, or an existing
+          // row makes the insert fail. Assigning a column to itself is
+          // MySQL's idiom for "do nothing"; `INSERT IGNORE` would also
+          // downgrade unrelated errors to warnings, which must stay loud.
+          const key = quoteIdent(firstColumn);
+          sql += ` ON DUPLICATE KEY UPDATE ${key} = ${key}`;
         }
       }
 
