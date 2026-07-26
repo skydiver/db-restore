@@ -1,5 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// ora writes its spinner frames straight to stderr, which vitest's console
+// interception does not capture — stub it so a passing run stays quiet.
+vi.mock('ora', () => {
+  const spinner = {
+    start: vi.fn(() => spinner),
+    succeed: vi.fn(() => spinner),
+    fail: vi.fn(() => spinner),
+    stop: vi.fn(() => spinner),
+  };
+  return { default: vi.fn(() => spinner) };
+});
+
 vi.mock('../../src/config/profiles.js', () => ({
   profileExists: vi.fn(),
   saveProfile: vi.fn(),
