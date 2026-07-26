@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { assertSafeProfileName } from './utils/table-name.js';
 
 export const EXCLUDED_TABLES = new Set([
   '_prisma_migrations',
@@ -19,6 +20,7 @@ export const DUMPS_DIR = join(CONFIG_BASE_DIR, 'dumps');
 export const ARCHIVE_DIR = join(CONFIG_BASE_DIR, 'archive');
 
 export function getDefaultDumpDir(profileName: string): string {
+  assertSafeProfileName(profileName);
   return join(DUMPS_DIR, profileName);
 }
 export const METADATA_FILENAME = '_metadata.json';

@@ -40,3 +40,25 @@ export function toSafeFilename(table: string): string {
 
   return encoded;
 }
+
+/**
+ * Validates a profile name for use as a filesystem path segment (profile
+ * JSON files, dump directories, archive filenames). Unlike `toSafeFilename`,
+ * this REJECTS rather than rewrites: silently mangling `../../etc/foo` into
+ * an encoded filename would create a confusing orphan profile instead of
+ * surfacing the mistake (or attack) to the caller.
+ */
+export function assertSafeProfileName(name: string): string {
+  if (name.length === 0) {
+    throw new Error('Profile name must not be empty.');
+  }
+
+  const encoded = toSafeFilename(name);
+  if (encoded !== name) {
+    throw new Error(
+      `Invalid profile name "${name}": only letters, numbers, "_", "-", and "." are allowed, and the name must not be "." or "..".`
+    );
+  }
+
+  return name;
+}

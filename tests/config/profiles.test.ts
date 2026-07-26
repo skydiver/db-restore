@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -71,6 +72,47 @@ describe('profiles', () => {
 
   it('throws when loading a non-existent profile', async () => {
     await expect(loadProfile('nope', tempDir)).rejects.toThrow();
+  });
+
+  describe('hostile profile names (path traversal)', () => {
+    it('rejects saveProfile with a traversing name and creates no file outside the profiles dir', async () => {
+      const victimDir = join(tempDir, 'outside');
+      await mkdir(victimDir);
+      const escapedName = `../outside/ESCAPED`;
+
+      await expect(
+        saveProfile({ ...pgProfile, name: escapedName }, join(tempDir, 'profiles'))
+      ).rejects.toThrow();
+
+      expect(existsSync(join(victimDir, 'ESCAPED.json'))).toBe(false);
+    });
+
+    it('rejects deleteProfile with a traversing name and does not unlink the victim file', async () => {
+      const victimDir = join(tempDir, 'outside');
+      await mkdir(victimDir);
+      const victimFile = join(victimDir, 'some-file.json');
+      await writeFile(victimFile, '{"victim":true}');
+
+      await expect(
+        deleteProfile('../outside/some-file', join(tempDir, 'profiles'))
+      ).rejects.toThrow();
+
+      expect(existsSync(victimFile)).toBe(true);
+    });
+
+    it('does not resolve an escaped path for profileExists', async () => {
+      const victimDir = join(tempDir, 'outside');
+      await mkdir(victimDir);
+      await writeFile(join(victimDir, 'ESCAPED.json'), '{}');
+
+      await expect(
+        profileExists('../outside/ESCAPED', join(tempDir, 'profiles'))
+      ).rejects.toThrow();
+    });
+
+    it('rejects loadProfile with a traversing name', async () => {
+      await expect(loadProfile('../../../etc/passwd', tempDir)).rejects.toThrow();
+    });
   });
 
   it.runIf(process.platform !== 'win32')(

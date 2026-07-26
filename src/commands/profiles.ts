@@ -25,13 +25,10 @@ export async function profilesCommand(): Promise<void> {
 }
 
 export async function removeCommand(name: string): Promise<void> {
-  try {
-    await deleteProfile(name);
-    logger.success(`Profile "${name}" removed.`);
-  } catch (err) {
-    logger.error(
-      err instanceof Error ? err.message : String(err),
-      'Run: db-restore profiles to see available profiles'
-    );
-  }
+  // Errors (e.g. "profile not found") are intentionally left to propagate to
+  // the caller's error handler rather than swallowed here, so a failed
+  // removal is reported via a non-zero exit code instead of looking like
+  // a no-op success.
+  await deleteProfile(name);
+  logger.success(`Profile "${name}" removed.`);
 }

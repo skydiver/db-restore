@@ -15,14 +15,25 @@ export async function askArchiveChoice(): Promise<'archive' | 'discard' | 'cance
   });
 }
 
-export async function askPostRestoreChoice(): Promise<'delete' | 'archive' | 'quit'> {
+/**
+ * `hadErrors` indicates the restore that just ran reported table failures.
+ * In that case the dump directory is the only surviving copy of the data
+ * the restore failed to write, so "Delete dump files" is omitted entirely
+ * rather than merely de-emphasized. `Keep as-is` is always listed first so
+ * a reflexive Enter (inquirer highlights choice[0]) never triggers deletion.
+ */
+export async function askPostRestoreChoice(
+  hadErrors: boolean
+): Promise<'delete' | 'archive' | 'keep'> {
+  const choices = [
+    { name: 'Keep as-is', value: 'keep' as const },
+    { name: 'Archive (.tar.gz)', value: 'archive' as const },
+    ...(hadErrors ? [] : [{ name: 'Delete dump files', value: 'delete' as const }]),
+  ];
+
   return select({
     message: 'What would you like to do with the dump files?',
-    choices: [
-      { name: 'Delete dump files', value: 'delete' as const },
-      { name: 'Archive (.tar.gz)', value: 'archive' as const },
-      { name: 'Keep as-is', value: 'quit' as const },
-    ],
+    choices,
   });
 }
 

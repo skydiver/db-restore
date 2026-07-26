@@ -1,6 +1,13 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createConnection } from 'mysql2/promise';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { executeDump } from '../../src/commands/dump.js';
+import { executeRestore } from '../../src/commands/restore.js';
+import { DUMP_FORMAT_VERSION } from '../../src/constants.js';
 import { MysqlProvider } from '../../src/providers/mysql.js';
+import { writeMetadata, writeTableDump } from '../../src/utils/files.js';
 
 const TEST_DB = 'db_restore_test';
 // Overridable so the suite can run against any local MySQL — see
@@ -135,5 +142,134 @@ describe.skipIf(!mysqlAvailable)('MysqlProvider', () => {
     expect(row['quantity']).toBe(3);
     // Recomputed by the database, not restored from the dump.
     expect(Number(row['total'])).toBe(60);
+  });
+
+  describe('64-bit integers (C5)', () => {
+    let tempDir: string;
+
+    beforeEach(async () => {
+      tempDir = await mkdtemp(join(tmpdir(), 'db-restore-mysql-bigint-'));
+    });
+
+    afterEach(async () => {
+      await rm(tempDir, { recursive: true });
+    });
+
+    it('round-trips a 64-bit integer beyond Number.MAX_SAFE_INTEGER exactly', async () => {
+      const BIG = '9007199254740993'; // 2^53 + 1 — not exactly representable as a double
+
+      const setup = await createConnection(TEST_CONFIG);
+      await setup.query('DROP TABLE IF EXISTS events');
+      await setup.query('CREATE TABLE events (id INT PRIMARY KEY, external_id BIGINT)');
+      await setup.query(`INSERT INTO events (id, external_id) VALUES (1, ${BIG})`);
+      await setup.end();
+
+      const sourceProvider = new MysqlProvider();
+      await sourceProvider.connect(TEST_CONFIG);
+      await executeDump(sourceProvider, 'mysql', tempDir);
+      await sourceProvider.disconnect();
+
+      const reset = await createConnection(TEST_CONFIG);
+      await reset.query('DELETE FROM events');
+      await reset.end();
+
+      const result = await executeRestore(provider, tempDir);
+      expect(result.errors).toHaveLength(0);
+
+      const rows = (await provider.getRows('events')) as Record<string, unknown>[];
+      expect(String(rows[0]?.['external_id'])).toBe(BIG);
+
+      const cleanup = await createConnection(TEST_CONFIG);
+      await cleanup.query('DROP TABLE events');
+      await cleanup.end();
+    });
+  });
+
+  describe('withTransaction (restore atomicity)', () => {
+    let tempDir: string;
+
+    beforeEach(async () => {
+      tempDir = await mkdtemp(join(tmpdir(), 'db-restore-mysql-tx-'));
+    });
+
+    afterEach(async () => {
+      await rm(tempDir, { recursive: true });
+    });
+
+    it('rolls back the whole table when an insert fails mid-batch, preserving pre-existing rows', async () => {
+      const setup = await createConnection(TEST_CONFIG);
+      await setup.query('DROP TABLE IF EXISTS accounts');
+      await setup.query(`
+        CREATE TABLE accounts (
+          id INT PRIMARY KEY,
+          name VARCHAR(255) NOT NULL,
+          balance INT
+        )
+      `);
+      await setup.query("INSERT INTO accounts VALUES (1, 'Existing', 100)");
+      await setup.end();
+
+      await writeTableDump(
+        {
+          table: 'accounts',
+          primaryKeys: ['id'],
+          columns: [
+            { name: 'id', type: 'int' },
+            { name: 'name', type: 'varchar' },
+            { name: 'balance', type: 'int' },
+          ],
+          rows: [
+            { id: 2, name: 'New', balance: 50 },
+            { id: 3, name: null, balance: 10 },
+          ],
+        },
+        tempDir
+      );
+      await writeMetadata(
+        {
+          provider: 'mysql',
+          timestamp: new Date().toISOString(),
+          tables: ['accounts'],
+          version: DUMP_FORMAT_VERSION,
+        },
+        tempDir
+      );
+
+      const result = await executeRestore(provider, tempDir);
+
+      expect(result.errors.length).toBeGreaterThan(0);
+
+      const rows = await provider.getRows('accounts');
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ id: 1, name: 'Existing', balance: 100 });
+
+      const cleanup = await createConnection(TEST_CONFIG);
+      await cleanup.query('DROP TABLE accounts');
+      await cleanup.end();
+    });
+  });
+
+  describe('truncateTable', () => {
+    it('uses DELETE semantics, not TRUNCATE — auto_increment is not reset', async () => {
+      const setup = await createConnection(TEST_CONFIG);
+      await setup.query('DROP TABLE IF EXISTS solo');
+      await setup.query('CREATE TABLE solo (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255))');
+      await setup.query("INSERT INTO solo (name) VALUES ('a'), ('b'), ('c')");
+      // Leave a gap: delete the last row so AUTO_INCREMENT is ahead of MAX(id).
+      await setup.query('DELETE FROM solo WHERE id = 3');
+      await setup.end();
+
+      await provider.truncateTable('solo');
+
+      const conn = await createConnection(TEST_CONFIG);
+      await conn.query("INSERT INTO solo (name) VALUES ('new')");
+      const [rows] = await conn.query('SELECT * FROM solo');
+      await conn.query('DROP TABLE solo');
+      await conn.end();
+
+      // TRUNCATE would reset AUTO_INCREMENT to 1; DELETE FROM does not, so
+      // the next id continues from where the counter was left (4, not 1).
+      expect((rows as { id: number }[])[0]?.id).toBe(4);
+    });
   });
 });

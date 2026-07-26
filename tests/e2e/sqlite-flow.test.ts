@@ -61,11 +61,12 @@ describe('E2E: full dump → reset → restore flow', () => {
     // === Phase 5: Verify ===
     const roles = db2.prepare('SELECT * FROM roles ORDER BY id').all() as Record<string, unknown>[];
     expect(roles).toHaveLength(3); // 2 from dump (upserted) + 1 new seed (kept)
-    expect(roles[2]).toMatchObject({ id: 3, name: 'moderator' }); // new seed preserved
+    // Under safeIntegers mode (see C5), INTEGER columns read back as BigInt.
+    expect(roles[2]).toMatchObject({ id: 3n, name: 'moderator' }); // new seed preserved
 
     const users = db2.prepare('SELECT * FROM users ORDER BY id').all() as Record<string, unknown>[];
     expect(users).toHaveLength(3); // all 3 from dump restored
-    expect(users[0]).toMatchObject({ id: 1, name: 'Alice', email: 'alice@dev.com' });
+    expect(users[0]).toMatchObject({ id: 1n, name: 'Alice', email: 'alice@dev.com' });
     expect(users[0]).toHaveProperty('avatar'); // new column exists, should be null
 
     // Schema drift warnings

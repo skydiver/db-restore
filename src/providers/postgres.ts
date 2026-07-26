@@ -1,7 +1,9 @@
 import pg from 'pg';
+import { describeError } from '../utils/error.js';
 import type { Column, ConnectionConfig, DatabaseProvider } from './types.js';
 
 export class PostgresProvider implements DatabaseProvider {
+  readonly name = 'postgres' as const;
   private client: pg.Client | null = null;
 
   async connect(config: ConnectionConfig): Promise<void> {
@@ -71,9 +73,13 @@ export class PostgresProvider implements DatabaseProvider {
     return result.rows as Record<string, unknown>[];
   }
 
+  // DELETE FROM, not TRUNCATE ... CASCADE: TRUNCATE CASCADE silently empties
+  // dependent tables that were never part of the restore, and TRUNCATE
+  // requires an ACCESS EXCLUSIVE lock. DELETE FROM respects the disabled FK
+  // triggers set up by disableForeignKeys() and only touches this table.
   async truncateTable(table: string): Promise<void> {
     const client = this.getClient();
-    await client.query(`TRUNCATE TABLE "${table}" CASCADE`);
+    await client.query(`DELETE FROM "${table}"`);
   }
 
   async upsertRows(
@@ -181,5 +187,23 @@ export class PostgresProvider implements DatabaseProvider {
   async enableForeignKeys(): Promise<void> {
     const client = this.getClient();
     await client.query("SET session_replication_role = 'origin'");
+  }
+
+  async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    const client = this.getClient();
+    await client.query('BEGIN');
+    try {
+      const result = await fn();
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackErr) {
+        // Never let a rollback failure hide the error that triggered it.
+        throw new Error(`Rollback failed after: ${describeError(err)}`, { cause: rollbackErr });
+      }
+      throw err;
+    }
   }
 }

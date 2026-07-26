@@ -1,12 +1,57 @@
 #!/usr/bin/env node
 
 // src/cli.ts
+import { realpathSync } from "fs";
+import { resolve as resolve2 } from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
 import { Command } from "commander";
 import ora2 from "ora";
 
 // src/constants.ts
 import { homedir } from "os";
 import { join } from "path";
+
+// src/utils/table-name.ts
+var SAFE_CHAR = /^[A-Za-z0-9_.-]$/;
+function percentEncodeChar(char) {
+  const bytes = Buffer.from(char, "utf-8");
+  return Array.from(bytes).map((byte) => `%${byte.toString(16).toUpperCase().padStart(2, "0")}`).join("");
+}
+function toSafeFilename(table) {
+  if (table.length === 0) {
+    throw new Error("Table name must not be empty");
+  }
+  let encoded = "";
+  for (const char of table) {
+    encoded += SAFE_CHAR.test(char) ? char : percentEncodeChar(char);
+  }
+  if (encoded.startsWith("-")) {
+    encoded = `%2D${encoded.slice(1)}`;
+  }
+  if (encoded === ".") {
+    encoded = "%2E";
+  } else if (encoded === "..") {
+    encoded = "%2E%2E";
+  }
+  if (encoded.length === 0) {
+    throw new Error("Table name produces an empty filename");
+  }
+  return encoded;
+}
+function assertSafeProfileName(name) {
+  if (name.length === 0) {
+    throw new Error("Profile name must not be empty.");
+  }
+  const encoded = toSafeFilename(name);
+  if (encoded !== name) {
+    throw new Error(
+      `Invalid profile name "${name}": only letters, numbers, "_", "-", and "." are allowed, and the name must not be "." or "..".`
+    );
+  }
+  return name;
+}
+
+// src/constants.ts
 var EXCLUDED_TABLES = /* @__PURE__ */ new Set([
   "_prisma_migrations",
   "__drizzle_migrations",
@@ -23,6 +68,7 @@ var CONFIG_BASE_DIR = join(homedir(), ".config", "db-restore");
 var DUMPS_DIR = join(CONFIG_BASE_DIR, "dumps");
 var ARCHIVE_DIR = join(CONFIG_BASE_DIR, "archive");
 function getDefaultDumpDir(profileName) {
+  assertSafeProfileName(profileName);
   return join(DUMPS_DIR, profileName);
 }
 var METADATA_FILENAME = "_metadata.json";
@@ -34,9 +80,14 @@ var PROVIDER_DEFAULTS = {
 var BATCH_SIZE = 500;
 
 // src/encoding/encode.ts
+var MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+var MIN_SAFE_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
 function encodeValue(value) {
   if (value === null || value === void 0) return value;
   if (typeof value === "bigint") {
+    if (value >= MIN_SAFE_BIGINT && value <= MAX_SAFE_BIGINT) {
+      return Number(value);
+    }
     return { __type: "bigint", value: value.toString() };
   }
   if (value instanceof Date) {
@@ -78,34 +129,6 @@ async function ensureDir(dir, mode) {
     const code = err.code;
     if (code !== "EPERM" && code !== "EACCES") throw err;
   }
-}
-
-// src/utils/table-name.ts
-var SAFE_CHAR = /^[A-Za-z0-9_.-]$/;
-function percentEncodeChar(char) {
-  const bytes = Buffer.from(char, "utf-8");
-  return Array.from(bytes).map((byte) => `%${byte.toString(16).toUpperCase().padStart(2, "0")}`).join("");
-}
-function toSafeFilename(table) {
-  if (table.length === 0) {
-    throw new Error("Table name must not be empty");
-  }
-  let encoded = "";
-  for (const char of table) {
-    encoded += SAFE_CHAR.test(char) ? char : percentEncodeChar(char);
-  }
-  if (encoded.startsWith("-")) {
-    encoded = `%2D${encoded.slice(1)}`;
-  }
-  if (encoded === ".") {
-    encoded = "%2E";
-  } else if (encoded === "..") {
-    encoded = "%2E%2E";
-  }
-  if (encoded.length === 0) {
-    throw new Error("Table name produces an empty filename");
-  }
-  return encoded;
 }
 
 // src/utils/files.ts
@@ -213,6 +236,7 @@ function resolveDir(configDir) {
   return join2(CONFIG_BASE_DIR, "profiles");
 }
 async function saveProfile(profile, configDir) {
+  assertSafeProfileName(profile.name);
   const dir = resolveDir(configDir);
   await ensureDir(dir, DIR_MODE2);
   const filePath = join2(dir, `${profile.name}.json`);
@@ -223,6 +247,7 @@ async function saveProfile(profile, configDir) {
   await chmod3(filePath, FILE_MODE2);
 }
 async function loadProfile(name, configDir) {
+  assertSafeProfileName(name);
   const dir = resolveDir(configDir);
   const filePath = join2(dir, `${name}.json`);
   if (!existsSync2(filePath)) {
@@ -244,6 +269,7 @@ async function listProfiles(configDir) {
   return profiles;
 }
 async function deleteProfile(name, configDir) {
+  assertSafeProfileName(name);
   const dir = resolveDir(configDir);
   const filePath = join2(dir, `${name}.json`);
   if (!existsSync2(filePath)) {
@@ -252,6 +278,7 @@ async function deleteProfile(name, configDir) {
   await rm(filePath);
 }
 async function profileExists(name, configDir) {
+  assertSafeProfileName(name);
   const dir = resolveDir(configDir);
   return existsSync2(join2(dir, `${name}.json`));
 }
@@ -318,15 +345,8 @@ async function profilesCommand() {
   });
 }
 async function removeCommand(name) {
-  try {
-    await deleteProfile(name);
-    success(`Profile "${name}" removed.`);
-  } catch (err) {
-    error(
-      err instanceof Error ? err.message : String(err),
-      "Run: db-restore profiles to see available profiles"
-    );
-  }
+  await deleteProfile(name);
+  success(`Profile "${name}" removed.`);
 }
 
 // src/encoding/decode.ts
@@ -369,7 +389,18 @@ function chunk(array, size = BATCH_SIZE) {
 
 // src/commands/restore.ts
 async function executeRestore(provider, inputDir) {
-  await readMetadata(inputDir);
+  const metadata = await readMetadata(inputDir);
+  const activeProvider = provider.name;
+  if (metadata.provider !== activeProvider) {
+    throw new Error(
+      `Dump was created with provider "${metadata.provider}" but the active profile uses "${activeProvider}". Restore aborted to avoid restoring incompatible data.`
+    );
+  }
+  if (metadata.version !== DUMP_FORMAT_VERSION) {
+    throw new Error(
+      `Dump format version mismatch: dump was created with version ${metadata.version}, but this tool expects version ${DUMP_FORMAT_VERSION}. Restore aborted.`
+    );
+  }
   const tableFiles = await getTableFiles(inputDir);
   const result = { tables: [], totalRows: 0, warnings: [], errors: [] };
   await provider.disableForeignKeys();
@@ -387,16 +418,16 @@ async function executeRestore(provider, inputDir) {
         const currentColumns = await provider.getColumns(tableName);
         const currentColNames = new Set(currentColumns.map((c) => c.name));
         const dumpColNames = new Set(dump.columns.map((c) => c.name));
-        const matchingColumns = [];
         for (const col of dump.columns) {
-          if (currentColNames.has(col.name)) {
-            matchingColumns.push(col);
-          } else {
+          if (!currentColNames.has(col.name)) {
             result.warnings.push(`Skipping removed column "${col.name}" in table "${tableName}"`);
           }
         }
+        const matchingColumns = [];
         for (const col of currentColumns) {
-          if (!dumpColNames.has(col.name)) {
+          if (dumpColNames.has(col.name)) {
+            matchingColumns.push(col);
+          } else {
             result.warnings.push(
               `New column "${col.name}" in table "${tableName}" will use DB default`
             );
@@ -413,10 +444,12 @@ async function executeRestore(provider, inputDir) {
         const currentPks = await provider.getPrimaryKeys(tableName);
         const hasPrimaryKey = currentPks.length > 0;
         if (hasPrimaryKey) {
-          const batches = chunk(decodedRows);
-          for (const batch of batches) {
-            await provider.upsertRows(tableName, matchingColumns, currentPks, batch);
-          }
+          await provider.withTransaction(async () => {
+            const batches = chunk(decodedRows);
+            for (const batch of batches) {
+              await provider.upsertRows(tableName, matchingColumns, currentPks, batch);
+            }
+          });
           result.tables.push({
             table: tableName,
             rowCount: decodedRows.length,
@@ -426,11 +459,13 @@ async function executeRestore(provider, inputDir) {
           result.warnings.push(
             `Table "${tableName}" has no primary key \u2014 using TRUNCATE + INSERT instead of UPSERT`
           );
-          await provider.truncateTable(tableName);
-          const batches = chunk(decodedRows);
-          for (const batch of batches) {
-            await provider.upsertRows(tableName, matchingColumns, [], batch);
-          }
+          await provider.withTransaction(async () => {
+            await provider.truncateTable(tableName);
+            const batches = chunk(decodedRows);
+            for (const batch of batches) {
+              await provider.upsertRows(tableName, matchingColumns, [], batch);
+            }
+          });
           result.tables.push({
             table: tableName,
             rowCount: decodedRows.length,
@@ -471,14 +506,15 @@ async function askArchiveChoice() {
     ]
   });
 }
-async function askPostRestoreChoice() {
+async function askPostRestoreChoice(hadErrors) {
+  const choices = [
+    { name: "Keep as-is", value: "keep" },
+    { name: "Archive (.tar.gz)", value: "archive" },
+    ...hadErrors ? [] : [{ name: "Delete dump files", value: "delete" }]
+  ];
   return select({
     message: "What would you like to do with the dump files?",
-    choices: [
-      { name: "Delete dump files", value: "delete" },
-      { name: "Archive (.tar.gz)", value: "archive" },
-      { name: "Keep as-is", value: "quit" }
-    ]
+    choices
   });
 }
 async function askOverwrite(name) {
@@ -492,15 +528,15 @@ async function askOverwrite(name) {
 async function createProvider(provider) {
   switch (provider) {
     case "sqlite": {
-      const { SqliteProvider } = await import("./sqlite-FIPC5ELY.js");
+      const { SqliteProvider } = await import("./sqlite-MKFLZFA7.js");
       return new SqliteProvider();
     }
     case "postgres": {
-      const { PostgresProvider } = await import("./postgres-2JOHPUMY.js");
+      const { PostgresProvider } = await import("./postgres-5X5AY3DL.js");
       return new PostgresProvider();
     }
     case "mysql": {
-      const { MysqlProvider } = await import("./mysql-BDCNEWSB.js");
+      const { MysqlProvider } = await import("./mysql-UGRPCMY3.js");
       return new MysqlProvider();
     }
     default:
@@ -522,6 +558,7 @@ function buildConnectionConfig(profile, password2) {
 
 // src/commands/setup.ts
 async function setupCommand(name) {
+  assertSafeProfileName(name);
   if (await profileExists(name)) {
     const overwrite = await askOverwrite(name);
     if (!overwrite) {
@@ -563,11 +600,7 @@ async function setupCommand(name) {
     spinner.succeed("Connected.");
   } catch (err) {
     spinner.fail("Connection failed.");
-    error(
-      err instanceof Error ? err.message : String(err),
-      "Check your connection details and try again."
-    );
-    return;
+    throw err;
   }
   await saveProfile(profile);
   success(`Profile "${name}" saved.`);
@@ -652,6 +685,7 @@ function isSafeArchiveEntry(filename) {
   return !filename.startsWith("-") && !filename.includes("/") && !filename.includes("\\");
 }
 async function archiveDump(dumpDir, profileName) {
+  assertSafeProfileName(profileName);
   await ensureDir(ARCHIVE_DIR, ARCHIVE_DIR_MODE);
   const now = /* @__PURE__ */ new Date();
   const date = now.toISOString().slice(0, 10).replace(/-/g, "");
@@ -748,6 +782,7 @@ async function runRestore(name, opts) {
     error(first ?? error2, hint);
   }
   if (hasErrors) {
+    process.exitCode = 1;
     info(
       `Partial restore: ${result.totalRows} rows across ${result.tables.length} tables (${result.errors.length} table(s) failed)`
     );
@@ -756,7 +791,7 @@ async function runRestore(name, opts) {
       `Restore complete (${result.totalRows} rows across ${result.tables.length} tables)`
     );
   }
-  const postChoice = await askPostRestoreChoice();
+  const postChoice = await askPostRestoreChoice(hasErrors);
   if (postChoice === "delete") {
     await deleteDump(inputDir);
     info("Dump files deleted.");
@@ -772,6 +807,7 @@ program.name("db-restore").description("Database backup & restore for local deve
       return;
     }
     try {
+      assertSafeProfileName(name);
       if (!await profileExists(name)) {
         error(
           `Profile "${name}" not found.`,
@@ -806,7 +842,7 @@ program.command("setup <name>").description("Create a new database profile inter
   try {
     await setupCommand(name);
   } catch (err) {
-    handleError(err);
+    handleError(err, { profile: name });
     process.exit(1);
   }
 });
@@ -826,4 +862,20 @@ program.command("remove <name>").description("Delete a profile").action(async (n
     process.exit(1);
   }
 });
-program.parse();
+function isDirectRun() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  const self = fileURLToPath2(import.meta.url);
+  try {
+    return realpathSync(self) === realpathSync(entry);
+  } catch {
+    return self === resolve2(entry);
+  }
+}
+if (isDirectRun()) {
+  program.parse();
+}
+export {
+  runDump,
+  runRestore
+};

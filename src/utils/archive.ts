@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { ARCHIVE_DIR } from '../constants.js';
 import { ensureDir } from './dir-mode.js';
+import { assertSafeProfileName } from './table-name.js';
 
 const execFileAsync = promisify(execFile);
 const ARCHIVE_DIR_MODE = 0o700;
@@ -21,6 +22,7 @@ function isSafeArchiveEntry(filename: string): boolean {
 }
 
 export async function archiveDump(dumpDir: string, profileName: string): Promise<string> {
+  assertSafeProfileName(profileName);
   await ensureDir(ARCHIVE_DIR, ARCHIVE_DIR_MODE);
 
   const now = new Date();

@@ -1,3 +1,4 @@
+import { DUMP_FORMAT_VERSION } from '../constants.js';
 import { decodeRow } from '../encoding/decode.js';
 import type { Column, DatabaseProvider } from '../providers/types.js';
 import { chunk } from '../utils/batch.js';
@@ -14,7 +15,23 @@ export async function executeRestore(
   provider: DatabaseProvider,
   inputDir: string
 ): Promise<RestoreResult> {
-  await readMetadata(inputDir);
+  const metadata = await readMetadata(inputDir);
+  const activeProvider = provider.name;
+
+  if (metadata.provider !== activeProvider) {
+    throw new Error(
+      `Dump was created with provider "${metadata.provider}" but the active profile uses ` +
+        `"${activeProvider}". Restore aborted to avoid restoring incompatible data.`
+    );
+  }
+
+  if (metadata.version !== DUMP_FORMAT_VERSION) {
+    throw new Error(
+      `Dump format version mismatch: dump was created with version ${metadata.version}, ` +
+        `but this tool expects version ${DUMP_FORMAT_VERSION}. Restore aborted.`
+    );
+  }
+
   const tableFiles = await getTableFiles(inputDir);
 
   const result: RestoreResult = { tables: [], totalRows: 0, warnings: [], errors: [] };
@@ -40,17 +57,20 @@ export async function executeRestore(
         const currentColNames = new Set(currentColumns.map((c) => c.name));
         const dumpColNames = new Set(dump.columns.map((c) => c.name));
 
-        const matchingColumns: Column[] = [];
         for (const col of dump.columns) {
-          if (currentColNames.has(col.name)) {
-            matchingColumns.push(col);
-          } else {
+          if (!currentColNames.has(col.name)) {
             result.warnings.push(`Skipping removed column "${col.name}" in table "${tableName}"`);
           }
         }
 
+        // Built from the live schema, not the dump's recorded columns, so
+        // the type string driving encoding decisions (e.g. json/jsonb
+        // handling in upsertRows) always reflects the current database.
+        const matchingColumns: Column[] = [];
         for (const col of currentColumns) {
-          if (!dumpColNames.has(col.name)) {
+          if (dumpColNames.has(col.name)) {
+            matchingColumns.push(col);
+          } else {
             result.warnings.push(
               `New column "${col.name}" in table "${tableName}" will use DB default`
             );
@@ -72,26 +92,33 @@ export async function executeRestore(
         const hasPrimaryKey = currentPks.length > 0;
 
         if (hasPrimaryKey) {
-          // UPSERT in batches
-          const batches = chunk(decodedRows);
-          for (const batch of batches) {
-            await provider.upsertRows(tableName, matchingColumns, currentPks, batch);
-          }
+          // UPSERT in batches, atomically: a failure partway through must
+          // not leave some rows of this table committed and others not.
+          await provider.withTransaction(async () => {
+            const batches = chunk(decodedRows);
+            for (const batch of batches) {
+              await provider.upsertRows(tableName, matchingColumns, currentPks, batch);
+            }
+          });
           result.tables.push({
             table: tableName,
             rowCount: decodedRows.length,
             strategy: 'upsert',
           });
         } else {
-          // Fallback: TRUNCATE + INSERT
+          // Fallback: TRUNCATE + INSERT, atomically — a failure partway
+          // through must not leave the table truncated with only some rows
+          // restored, losing the pre-existing data for nothing.
           result.warnings.push(
             `Table "${tableName}" has no primary key — using TRUNCATE + INSERT instead of UPSERT`
           );
-          await provider.truncateTable(tableName);
-          const batches = chunk(decodedRows);
-          for (const batch of batches) {
-            await provider.upsertRows(tableName, matchingColumns, [], batch);
-          }
+          await provider.withTransaction(async () => {
+            await provider.truncateTable(tableName);
+            const batches = chunk(decodedRows);
+            for (const batch of batches) {
+              await provider.upsertRows(tableName, matchingColumns, [], batch);
+            }
+          });
           result.tables.push({
             table: tableName,
             rowCount: decodedRows.length,

@@ -1,13 +1,20 @@
+import {
+  describeError
+} from "./chunk-KY2R65TE.js";
+
 // src/providers/sqlite.ts
 import Database from "better-sqlite3";
 var SqliteProvider = class {
+  name = "sqlite";
   db = null;
   async connect(config) {
     this.db = new Database(config.path);
+    this.db.defaultSafeIntegers(true);
   }
   /** Test helper: inject an already-open database */
   connectWithDb(db) {
     this.db = db;
+    this.db.defaultSafeIntegers(true);
   }
   async disconnect() {
     this.db?.close();
@@ -24,12 +31,12 @@ var SqliteProvider = class {
   }
   async getColumns(table) {
     const db = this.getDb();
-    const rows = db.pragma(`table_info(${table})`);
+    const rows = db.pragma(`table_info("${table.replace(/"/g, '""')}")`);
     return rows.map((r) => ({ name: r.name, type: r.type }));
   }
   async getPrimaryKeys(table) {
     const db = this.getDb();
-    const rows = db.pragma(`table_info(${table})`);
+    const rows = db.pragma(`table_info("${table.replace(/"/g, '""')}")`);
     return rows.filter((r) => r.pk > 0).map((r) => r.name);
   }
   async getRows(table) {
@@ -78,6 +85,22 @@ var SqliteProvider = class {
   }
   async enableForeignKeys() {
     this.getDb().pragma("foreign_keys = ON");
+  }
+  async withTransaction(fn) {
+    const db = this.getDb();
+    db.exec("BEGIN");
+    try {
+      const result = await fn();
+      db.exec("COMMIT");
+      return result;
+    } catch (err) {
+      try {
+        db.exec("ROLLBACK");
+      } catch (rollbackErr) {
+        throw new Error(`Rollback failed after: ${describeError(err)}`, { cause: rollbackErr });
+      }
+      throw err;
+    }
   }
 };
 export {

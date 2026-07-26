@@ -82,7 +82,8 @@ describe('SqliteProvider', () => {
       );
 
       const rows = (await provider.getRows('line_items')) as Record<string, unknown>[];
-      const row = rows.find((r) => r['id'] === 1) as Record<string, unknown>;
+      // Under safeIntegers mode, every INTEGER column reads back as BigInt.
+      const row = rows.find((r) => r['id'] === 1n) as Record<string, unknown>;
       expect(row['total']).toBe(60);
     });
   });
@@ -98,8 +99,11 @@ describe('SqliteProvider', () => {
     it('returns all rows from a table', async () => {
       const rows = await provider.getRows('users');
       expect(rows).toHaveLength(2);
+      // Under safeIntegers mode, INTEGER columns read back as BigInt — this
+      // is what lets 64-bit values survive a round trip without precision
+      // loss (see C5).
       expect(rows[0]).toEqual({
-        id: 1,
+        id: 1n,
         name: 'Alice',
         email: 'alice@test.com',
         created_at: '2026-01-15T10:30:00.000Z',
@@ -155,10 +159,32 @@ describe('SqliteProvider', () => {
       const allRows = await provider.getRows('users');
       expect(allRows).toHaveLength(2);
       expect(allRows[0]).toMatchObject({
-        id: 1,
+        id: 1n,
         name: 'Alice Updated',
         email: 'newalice@test.com',
       });
+    });
+  });
+
+  describe('hostile table names', () => {
+    const hostileTables = ['order items', 'a-b', 'order', 'select', 'a.b', 'a"b'];
+
+    beforeEach(() => {
+      for (const table of hostileTables) {
+        const quoted = `"${table.replace(/"/g, '""')}"`;
+        db.exec(`CREATE TABLE ${quoted} (id INTEGER PRIMARY KEY, name TEXT)`);
+        db.prepare(`INSERT INTO ${quoted} (id, name) VALUES (1, 'x')`).run();
+      }
+    });
+
+    it.each(hostileTables)('getColumns works for table named %j', async (table) => {
+      const columns = await provider.getColumns(table);
+      expect(columns.map((c) => c.name)).toEqual(['id', 'name']);
+    });
+
+    it.each(hostileTables)('getPrimaryKeys works for table named %j', async (table) => {
+      const pks = await provider.getPrimaryKeys(table);
+      expect(pks).toEqual(['id']);
     });
   });
 

@@ -1,6 +1,11 @@
+import {
+  describeError
+} from "./chunk-KY2R65TE.js";
+
 // src/providers/mysql.ts
 import { createConnection } from "mysql2/promise";
 var MysqlProvider = class {
+  name = "mysql";
   connection = null;
   async connect(config) {
     this.connection = await createConnection({
@@ -8,7 +13,12 @@ var MysqlProvider = class {
       port: config.port,
       database: config.database,
       user: config.user,
-      password: config.password
+      password: config.password,
+      // Integers outside Number.MAX_SAFE_INTEGER come back as strings
+      // instead of being silently rounded — bigNumberStrings stays false so
+      // safe integers still read back as plain numbers.
+      supportBigNumbers: true,
+      bigNumberStrings: false
     });
   }
   async disconnect() {
@@ -66,7 +76,7 @@ var MysqlProvider = class {
   }
   async truncateTable(table) {
     const conn = this.getConnection();
-    await conn.query(`TRUNCATE TABLE \`${table}\``);
+    await conn.query(`DELETE FROM \`${table}\``);
   }
   async upsertRows(table, columns, primaryKeys, rows) {
     const conn = this.getConnection();
@@ -106,6 +116,22 @@ var MysqlProvider = class {
   async enableForeignKeys() {
     const conn = this.getConnection();
     await conn.query("SET FOREIGN_KEY_CHECKS = 1");
+  }
+  async withTransaction(fn) {
+    const conn = this.getConnection();
+    await conn.beginTransaction();
+    try {
+      const result = await fn();
+      await conn.commit();
+      return result;
+    } catch (err) {
+      try {
+        await conn.rollback();
+      } catch (rollbackErr) {
+        throw new Error(`Rollback failed after: ${describeError(err)}`, { cause: rollbackErr });
+      }
+      throw err;
+    }
   }
 };
 export {

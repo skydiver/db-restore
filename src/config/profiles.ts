@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { CONFIG_BASE_DIR } from '../constants.js';
 import type { AnyProfileConfig } from '../providers/types.js';
 import { ensureDir } from '../utils/dir-mode.js';
+import { assertSafeProfileName } from '../utils/table-name.js';
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
@@ -14,6 +15,7 @@ function resolveDir(configDir?: string): string {
 }
 
 export async function saveProfile(profile: AnyProfileConfig, configDir?: string): Promise<void> {
+  assertSafeProfileName(profile.name);
   const dir = resolveDir(configDir);
   await ensureDir(dir, DIR_MODE);
   const filePath = join(dir, `${profile.name}.json`);
@@ -27,6 +29,7 @@ export async function saveProfile(profile: AnyProfileConfig, configDir?: string)
 }
 
 export async function loadProfile(name: string, configDir?: string): Promise<AnyProfileConfig> {
+  assertSafeProfileName(name);
   const dir = resolveDir(configDir);
   const filePath = join(dir, `${name}.json`);
   if (!existsSync(filePath)) {
@@ -53,6 +56,7 @@ export async function listProfiles(configDir?: string): Promise<AnyProfileConfig
 }
 
 export async function deleteProfile(name: string, configDir?: string): Promise<void> {
+  assertSafeProfileName(name);
   const dir = resolveDir(configDir);
   const filePath = join(dir, `${name}.json`);
   if (!existsSync(filePath)) {
@@ -62,6 +66,7 @@ export async function deleteProfile(name: string, configDir?: string): Promise<v
 }
 
 export async function profileExists(name: string, configDir?: string): Promise<boolean> {
+  assertSafeProfileName(name);
   const dir = resolveDir(configDir);
   return existsSync(join(dir, `${name}.json`));
 }

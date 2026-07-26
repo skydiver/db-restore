@@ -1,7 +1,9 @@
 import { type Connection, createConnection } from 'mysql2/promise';
+import { describeError } from '../utils/error.js';
 import type { Column, ConnectionConfig, DatabaseProvider } from './types.js';
 
 export class MysqlProvider implements DatabaseProvider {
+  readonly name = 'mysql' as const;
   private connection: Connection | null = null;
 
   async connect(config: ConnectionConfig): Promise<void> {
@@ -11,6 +13,11 @@ export class MysqlProvider implements DatabaseProvider {
       database: config.database,
       user: config.user,
       password: config.password,
+      // Integers outside Number.MAX_SAFE_INTEGER come back as strings
+      // instead of being silently rounded — bigNumberStrings stays false so
+      // safe integers still read back as plain numbers.
+      supportBigNumbers: true,
+      bigNumberStrings: false,
     });
   }
 
@@ -75,7 +82,11 @@ export class MysqlProvider implements DatabaseProvider {
 
   async truncateTable(table: string): Promise<void> {
     const conn = this.getConnection();
-    await conn.query(`TRUNCATE TABLE \`${table}\``);
+    // DELETE FROM, not TRUNCATE: MySQL's TRUNCATE causes an implicit COMMIT,
+    // which would silently break any surrounding transaction. DELETE FROM
+    // also respects disabled FK checks, unlike TRUNCATE ... CASCADE-style
+    // behavior on other engines.
+    await conn.query(`DELETE FROM \`${table}\``);
   }
 
   async upsertRows(
@@ -134,5 +145,23 @@ export class MysqlProvider implements DatabaseProvider {
   async enableForeignKeys(): Promise<void> {
     const conn = this.getConnection();
     await conn.query('SET FOREIGN_KEY_CHECKS = 1');
+  }
+
+  async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    const conn = this.getConnection();
+    await conn.beginTransaction();
+    try {
+      const result = await fn();
+      await conn.commit();
+      return result;
+    } catch (err) {
+      try {
+        await conn.rollback();
+      } catch (rollbackErr) {
+        // Never let a rollback failure hide the error that triggered it.
+        throw new Error(`Rollback failed after: ${describeError(err)}`, { cause: rollbackErr });
+      }
+      throw err;
+    }
   }
 }

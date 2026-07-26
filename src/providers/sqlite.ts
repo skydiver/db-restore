@@ -1,16 +1,20 @@
 import Database from 'better-sqlite3';
+import { describeError } from '../utils/error.js';
 import type { Column, DatabaseProvider, SqliteConfig } from './types.js';
 
 export class SqliteProvider implements DatabaseProvider {
+  readonly name = 'sqlite' as const;
   private db: Database.Database | null = null;
 
   async connect(config: SqliteConfig): Promise<void> {
     this.db = new Database(config.path);
+    this.db.defaultSafeIntegers(true);
   }
 
   /** Test helper: inject an already-open database */
   connectWithDb(db: Database.Database): void {
     this.db = db;
+    this.db.defaultSafeIntegers(true);
   }
 
   async disconnect(): Promise<void> {
@@ -33,7 +37,7 @@ export class SqliteProvider implements DatabaseProvider {
 
   async getColumns(table: string): Promise<Column[]> {
     const db = this.getDb();
-    const rows = db.pragma(`table_info(${table})`) as {
+    const rows = db.pragma(`table_info("${table.replace(/"/g, '""')}")`) as {
       name: string;
       type: string;
     }[];
@@ -42,7 +46,7 @@ export class SqliteProvider implements DatabaseProvider {
 
   async getPrimaryKeys(table: string): Promise<string[]> {
     const db = this.getDb();
-    const rows = db.pragma(`table_info(${table})`) as {
+    const rows = db.pragma(`table_info("${table.replace(/"/g, '""')}")`) as {
       name: string;
       pk: number;
     }[];
@@ -115,5 +119,23 @@ export class SqliteProvider implements DatabaseProvider {
 
   async enableForeignKeys(): Promise<void> {
     this.getDb().pragma('foreign_keys = ON');
+  }
+
+  async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    const db = this.getDb();
+    db.exec('BEGIN');
+    try {
+      const result = await fn();
+      db.exec('COMMIT');
+      return result;
+    } catch (err) {
+      try {
+        db.exec('ROLLBACK');
+      } catch (rollbackErr) {
+        // Never let a rollback failure hide the error that triggered it.
+        throw new Error(`Rollback failed after: ${describeError(err)}`, { cause: rollbackErr });
+      }
+      throw err;
+    }
   }
 }

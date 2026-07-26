@@ -1,6 +1,12 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { executeRestore } from '../../src/commands/restore.js';
+import { DUMP_FORMAT_VERSION } from '../../src/constants.js';
 import { PostgresProvider } from '../../src/providers/postgres.js';
+import { writeMetadata, writeTableDump } from '../../src/utils/files.js';
 
 const TEST_DB = 'db_restore_test';
 // Overridable so the suite can run against any local Postgres (e.g. a project
@@ -116,6 +122,104 @@ describe.skipIf(!pgAvailable)('PostgresProvider', () => {
   it('gets rows', async () => {
     const rows = await provider.getRows('users');
     expect(rows).toHaveLength(2);
+  });
+
+  describe('withTransaction (restore atomicity)', () => {
+    let tempDir: string;
+
+    beforeEach(async () => {
+      tempDir = await mkdtemp(join(tmpdir(), 'db-restore-pg-tx-'));
+    });
+
+    afterEach(async () => {
+      await rm(tempDir, { recursive: true });
+    });
+
+    it('rolls back the whole table when an insert fails mid-batch, preserving pre-existing rows', async () => {
+      const setupClient = new pg.Client(TEST_CONFIG);
+      await setupClient.connect();
+      await setupClient.query(`
+        DROP TABLE IF EXISTS accounts;
+        CREATE TABLE accounts (
+          id INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          balance INTEGER
+        );
+        INSERT INTO accounts VALUES (1, 'Existing', 100);
+      `);
+      await setupClient.end();
+
+      await writeTableDump(
+        {
+          table: 'accounts',
+          primaryKeys: ['id'],
+          columns: [
+            { name: 'id', type: 'integer' },
+            { name: 'name', type: 'text' },
+            { name: 'balance', type: 'integer' },
+          ],
+          rows: [
+            { id: 2, name: 'New', balance: 50 },
+            { id: 3, name: null, balance: 10 },
+          ],
+        },
+        tempDir
+      );
+      await writeMetadata(
+        {
+          provider: 'postgres',
+          timestamp: new Date().toISOString(),
+          tables: ['accounts'],
+          version: DUMP_FORMAT_VERSION,
+        },
+        tempDir
+      );
+
+      const result = await executeRestore(provider, tempDir);
+
+      expect(result.errors.length).toBeGreaterThan(0);
+
+      const rows = await provider.getRows('accounts');
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ id: 1, name: 'Existing', balance: 100 });
+
+      const cleanup = new pg.Client(TEST_CONFIG);
+      await cleanup.connect();
+      await cleanup.query('DROP TABLE accounts');
+      await cleanup.end();
+    });
+  });
+
+  describe('truncateTable', () => {
+    it('does not cascade into unrelated child tables via FK', async () => {
+      const setupClient = new pg.Client(TEST_CONFIG);
+      await setupClient.connect();
+      await setupClient.query(`
+        DROP TABLE IF EXISTS children;
+        DROP TABLE IF EXISTS parents;
+        CREATE TABLE parents (id SERIAL PRIMARY KEY, name TEXT);
+        CREATE TABLE children (
+          id SERIAL PRIMARY KEY,
+          parent_id INTEGER REFERENCES parents(id),
+          name TEXT
+        );
+        INSERT INTO parents (name) VALUES ('p1');
+        INSERT INTO children (parent_id, name) VALUES (1, 'c1');
+      `);
+      await setupClient.end();
+
+      await provider.disableForeignKeys();
+      await provider.truncateTable('parents');
+      await provider.enableForeignKeys();
+
+      const rows = await provider.getRows('children');
+      expect(rows).toHaveLength(1);
+
+      const cleanup = new pg.Client(TEST_CONFIG);
+      await cleanup.connect();
+      await cleanup.query('DROP TABLE children; DROP TABLE parents;');
+      await cleanup.end();
+    });
   });
 
   it('upserts rows', async () => {

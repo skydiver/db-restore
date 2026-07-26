@@ -25,6 +25,23 @@ describe('encodeValue', () => {
     });
   });
 
+  it('encodes a BigInt within the safe integer range as a plain number', () => {
+    expect(encodeValue(BigInt(42))).toBe(42);
+    expect(encodeValue(BigInt(Number.MAX_SAFE_INTEGER))).toBe(Number.MAX_SAFE_INTEGER);
+    expect(encodeValue(BigInt(Number.MIN_SAFE_INTEGER))).toBe(Number.MIN_SAFE_INTEGER);
+  });
+
+  it('keeps the bigint wrapper just outside the safe integer range', () => {
+    expect(encodeValue(BigInt(Number.MAX_SAFE_INTEGER) + 1n)).toEqual({
+      __type: 'bigint',
+      value: String(BigInt(Number.MAX_SAFE_INTEGER) + 1n),
+    });
+    expect(encodeValue(BigInt(Number.MIN_SAFE_INTEGER) - 1n)).toEqual({
+      __type: 'bigint',
+      value: String(BigInt(Number.MIN_SAFE_INTEGER) - 1n),
+    });
+  });
+
   it('encodes Date as ISO string', () => {
     const date = new Date('2026-01-15T10:30:00.000Z');
     expect(encodeValue(date)).toEqual({

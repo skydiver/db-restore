@@ -73,6 +73,12 @@ describe('archiveDump', () => {
     }
   );
 
+  it('rejects a traversing profile name instead of writing outside ARCHIVE_DIR', async () => {
+    await writeFile(join(dumpDir, 'users.json'), '{"table":"users"}');
+
+    await expect(archiveDump(dumpDir, '../../evil-profile')).rejects.toThrow();
+  });
+
   it.runIf(process.platform !== 'win32')(
     'creates the archive directory with restrictive permissions',
     async () => {

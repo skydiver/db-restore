@@ -6,8 +6,11 @@ import type { AnyProfileConfig, Provider } from '../providers/types.js';
 import * as logger from '../ui/logger.js';
 import { askOverwrite } from '../utils/prompt.js';
 import { buildConnectionConfig, createProvider } from '../utils/provider-factory.js';
+import { assertSafeProfileName } from '../utils/table-name.js';
 
 export async function setupCommand(name: string): Promise<void> {
+  assertSafeProfileName(name);
+
   // Check for existing profile
   if (await profileExists(name)) {
     const overwrite = await askOverwrite(name);
@@ -57,12 +60,12 @@ export async function setupCommand(name: string): Promise<void> {
     await dbProvider.disconnect();
     spinner.succeed('Connected.');
   } catch (err) {
+    // Only the spinner status is reported here; the error itself is left to
+    // propagate to the caller's error handler (which reports it once, with
+    // context, and sets a non-zero exit code) rather than being swallowed
+    // or logged twice.
     spinner.fail('Connection failed.');
-    logger.error(
-      err instanceof Error ? err.message : String(err),
-      'Check your connection details and try again.'
-    );
-    return;
+    throw err;
   }
 
   await saveProfile(profile);

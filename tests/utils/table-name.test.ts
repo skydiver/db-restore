@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toSafeFilename } from '../../src/utils/table-name.js';
+import { assertSafeProfileName, toSafeFilename } from '../../src/utils/table-name.js';
 
 describe('toSafeFilename', () => {
   it('leaves an ordinary identifier untouched', () => {
@@ -43,5 +43,25 @@ describe('toSafeFilename', () => {
     const a = toSafeFilename('order items');
     const b = toSafeFilename('order_items');
     expect(a).not.toBe(b);
+  });
+});
+
+describe('assertSafeProfileName', () => {
+  it.each(['myproject', 'my-project', 'my_project.v2'])(
+    'accepts an ordinary profile name %s unchanged',
+    (name) => {
+      expect(assertSafeProfileName(name)).toBe(name);
+    }
+  );
+
+  it.each(['../../evil', '-rf', 'a/b', '.', '..', 'wéird'])(
+    'rejects a hostile profile name %s instead of silently rewriting it',
+    (name) => {
+      expect(() => assertSafeProfileName(name)).toThrow();
+    }
+  );
+
+  it('rejects an empty profile name', () => {
+    expect(() => assertSafeProfileName('')).toThrow();
   });
 });

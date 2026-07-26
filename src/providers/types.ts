@@ -30,6 +30,9 @@ export interface DumpMetadata {
 }
 
 export interface DatabaseProvider {
+  /** Identifies the concrete provider, so callers can cross-check dump metadata
+   *  without importing (and therefore loading) every driver. */
+  readonly name: Provider;
   connect(config: ConnectionConfig | SqliteConfig): Promise<void>;
   disconnect(): Promise<void>;
   getTables(): Promise<string[]>;
@@ -46,6 +49,7 @@ export interface DatabaseProvider {
   resetSequences(table: string): Promise<void>;
   disableForeignKeys(): Promise<void>;
   enableForeignKeys(): Promise<void>;
+  withTransaction<T>(fn: () => Promise<T>): Promise<T>;
 }
 
 export type Provider = 'postgres' | 'mysql' | 'sqlite';

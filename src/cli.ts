@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import ora from 'ora';
 import { executeDump } from './commands/dump.js';
@@ -15,6 +18,7 @@ import { archiveDump, deleteDump } from './utils/archive.js';
 import { dumpExists, readMetadata } from './utils/files.js';
 import { askArchiveChoice, askPassword, askPostRestoreChoice } from './utils/prompt.js';
 import { buildConnectionConfig, createProvider } from './utils/provider-factory.js';
+import { assertSafeProfileName } from './utils/table-name.js';
 
 const program = new Command();
 
@@ -113,6 +117,7 @@ async function runRestore(name: string, opts: { in?: string; verbose: boolean })
   }
 
   if (hasErrors) {
+    process.exitCode = 1;
     logger.info(
       `Partial restore: ${result.totalRows} rows across ${result.tables.length} tables (${result.errors.length} table(s) failed)`
     );
@@ -122,7 +127,7 @@ async function runRestore(name: string, opts: { in?: string; verbose: boolean })
     );
   }
 
-  const postChoice = await askPostRestoreChoice();
+  const postChoice = await askPostRestoreChoice(hasErrors);
   if (postChoice === 'delete') {
     await deleteDump(inputDir);
     logger.info('Dump files deleted.');
@@ -154,6 +159,8 @@ program
       }
 
       try {
+        assertSafeProfileName(name);
+
         if (!(await profileExists(name))) {
           logger.error(
             `Profile "${name}" not found.`,
@@ -193,7 +200,7 @@ program
     try {
       await setupCommand(name);
     } catch (err) {
-      handleError(err);
+      handleError(err, { profile: name });
       process.exit(1);
     }
   });
@@ -222,4 +229,33 @@ program
     }
   });
 
-program.parse();
+/**
+ * True when this file is being run directly as the CLI entrypoint, false when
+ * it is merely imported (by tests) — importing a module should never have the
+ * side effect of executing a full CLI invocation against process.argv.
+ *
+ * Both sides must be normalised before comparing. `import.meta.url` is a
+ * percent-encoded URL with symlinks already resolved by the ESM loader, while
+ * `process.argv[1]` is a raw path with symlinks intact. Comparing them
+ * directly breaks on the package's own install path (`bin` entries are
+ * installed as symlinks) and on any directory containing a space.
+ */
+function isDirectRun(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+
+  const self = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(self) === realpathSync(entry);
+  } catch {
+    // realpathSync throws if either path no longer exists. Fall back to a
+    // plain comparison rather than silently declining to run the CLI.
+    return self === resolve(entry);
+  }
+}
+
+if (isDirectRun()) {
+  program.parse();
+}
+
+export { runDump, runRestore };
